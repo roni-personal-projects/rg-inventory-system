@@ -730,6 +730,9 @@ export default function BatchProductEntryPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
       {/* MODAL: MOBILE MIC PERMISSION GUIDE */}
       {showMobileMicHelp && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
