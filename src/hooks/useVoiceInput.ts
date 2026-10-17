@@ -18,6 +18,7 @@ export function useVoiceInput(options?: {
   continuous?: boolean;
 }) {
   const [isSupported, setIsSupported] = useState<boolean>(false);
+  const [isInsecureOrigin, setIsInsecureOrigin] = useState<boolean>(false);
   const [state, setState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string>('');
@@ -46,6 +47,18 @@ export function useVoiceInput(options?: {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const isLocalhost =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+      const isSecure =
+        window.isSecureContext ||
+        window.location.protocol === 'https:' ||
+        isLocalhost;
+
+      if (!isSecure) {
+        setIsInsecureOrigin(true);
+      }
+
       const win = window as IWindow;
       const SpeechClass = win.SpeechRecognition || win.webkitSpeechRecognition;
       const supported = Boolean(SpeechClass);
@@ -72,7 +85,7 @@ export function useVoiceInput(options?: {
     setInterimTranscript('');
   }, []);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     setError(null);
     setTranscript('');
     setInterimTranscript('');
@@ -81,6 +94,40 @@ export function useVoiceInput(options?: {
     processedFinalIndexRef.current = -1;
 
     if (typeof window === 'undefined') return;
+
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+    const isSecure =
+      window.isSecureContext ||
+      window.location.protocol === 'https:' ||
+      isLocalhost;
+
+    if (!isSecure) {
+      setIsInsecureOrigin(true);
+      const err = `Microphone blocked: Mobile browsers require HTTPS or a 1-time Chrome flag on local IP (${window.location.origin}). Tap "Mobile Mic Setup" below to enable it.`;
+      setError(err);
+      setState('error');
+      addLog(err);
+      return;
+    }
+
+    // Actively prompt for microphone permission via getUserMedia
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      try {
+        addLog('Requesting microphone permission from browser...');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        addLog('Microphone permission granted by user.');
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (micErr: any) {
+        addLog(`getUserMedia permission error: ${micErr.name} - ${micErr.message}`);
+        if (micErr.name === 'NotAllowedError' || micErr.name === 'PermissionDeniedError') {
+          setError('Microphone permission was denied. Please allow microphone access in your mobile browser address bar.');
+          setState('error');
+          return;
+        }
+      }
+    }
 
     const win = window as IWindow;
     const SpeechRecognitionClass = win.SpeechRecognition || win.webkitSpeechRecognition;
@@ -232,6 +279,7 @@ export function useVoiceInput(options?: {
 
   return {
     isSupported,
+    isInsecureOrigin,
     isListening: state === 'listening' || state === 'recognizing' || state === 'starting',
     state,
     transcript,

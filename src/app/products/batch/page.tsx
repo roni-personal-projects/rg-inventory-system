@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
+  HelpCircle,
   Sparkles,
   Globe,
   ClipboardList,
@@ -43,6 +44,7 @@ export default function BatchProductEntryPage() {
   const [pasteText, setPasteText] = useState('');
   const [showVoiceDebug, setShowVoiceDebug] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showMobileMicHelp, setShowMobileMicHelp] = useState(false);
   const [savedItemsCount, setSavedItemsCount] = useState(0);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -160,6 +162,7 @@ export default function BatchProductEntryPage() {
   // Continuous Voice Capture: handles finalized phrases cleanly
   const {
     isSupported,
+    isInsecureOrigin,
     isListening,
     interimTranscript,
     startListening,
@@ -358,6 +361,28 @@ export default function BatchProductEntryPage() {
             </button>
           </div>
         </div>
+
+        {/* Mobile Insecure Origin Banner */}
+        {isInsecureOrigin && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1.5 animate-in fade-in">
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center gap-1.5 text-blue-800">
+                <HelpCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Mobile Mic Not Asking For Permission?</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMobileMicHelp(true)}
+                className="text-xs text-blue-700 underline font-black hover:text-blue-900"
+              >
+                Fix in 20s →
+              </button>
+            </div>
+            <p className="text-[11px] text-blue-700 leading-normal">
+              Mobile browsers block mic permissions on plain HTTP IP addresses. Tap above for the quick 1-time Chrome flag to unlock microphone!
+            </p>
+          </div>
+        )}
 
         {/* Live Speaking Indicator */}
         {isListening && (
@@ -704,6 +729,77 @@ export default function BatchProductEntryPage() {
                 Parse into Grid
               </button>
             </div>
+          </div>
+      {/* MODAL: MOBILE MIC PERMISSION GUIDE */}
+      {showMobileMicHelp && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <span>📱</span>
+                <span>Enable Mobile Mic in Chrome</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowMobileMicHelp(false)}
+                className="text-slate-400 hover:text-slate-600 font-black text-xl"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Mobile Chrome blocks microphone access on local HTTP network addresses (like <code>http://192.168.0.100:3000</code>) unless whitelisted in Chrome flags. Here is the 20-second fix:
+            </p>
+
+            <ol className="text-xs text-slate-800 space-y-3 list-decimal list-inside font-medium bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <li>
+                Open a new tab in Chrome on your phone and go to:
+                <div className="mt-1 font-mono text-[11px] bg-white p-2 rounded-lg border border-slate-300 select-all break-all text-slate-900 font-bold">
+                  chrome://flags/#unsafely-treat-insecure-origin-as-secure
+                </div>
+              </li>
+              <li>
+                In the box labeled <strong>Insecure origins treated as secure</strong>, enter:
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="flex-1 font-mono text-[11px] bg-white p-2 rounded-lg border border-slate-300 font-bold text-amber-700 break-all select-all">
+                    {typeof window !== 'undefined' ? window.location.origin : 'http://192.168.0.100:3000'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(window.location.origin);
+                        alert('Copied URL to clipboard!');
+                      }
+                    }}
+                    className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold shrink-0"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </li>
+              <li>
+                Change dropdown from <strong>Disabled</strong> to <strong>Enabled</strong>.
+              </li>
+              <li>
+                Tap the blue <strong>Relaunch</strong> button at the bottom of Chrome.
+              </li>
+              <li>
+                Switch back to this page and tap <strong>Start Voice Capture</strong>: your phone will now prompt:
+                <div className="mt-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                  &ldquo;Allow Ruchi Gift Inventory to use your microphone?&rdquo; → Tap Allow!
+                </div>
+              </li>
+            </ol>
+
+            <button
+              type="button"
+              onClick={() => setShowMobileMicHelp(false)}
+              className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-sm"
+            >
+              Done / Got It
+            </button>
           </div>
         </div>
       )}
