@@ -3,13 +3,15 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Plus, AlertTriangle, XCircle, ArrowRight, Mic, Package, Filter } from 'lucide-react';
+import { Search, Plus, AlertTriangle, XCircle, ArrowRight, Mic, Package, Filter, CheckCircle2 } from 'lucide-react';
 import { formatRupees } from '@/lib/money';
 import { Product, PRODUCT_CATEGORIES } from '@/types';
 
 function ProductsContent() {
   const searchParams = useSearchParams();
   const initialFilter = searchParams.get('stockFilter') || 'all';
+  const savedParam = searchParams.get('saved');
+  const [showSavedBanner, setShowSavedBanner] = useState(savedParam === 'batch');
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,7 @@ function ProductsContent() {
       if (selectedCategory !== 'All') params.append('category', selectedCategory);
       if (stockFilter !== 'all') params.append('stockFilter', stockFilter);
 
-      const res = await fetch(`/api/products?${params.toString()}`);
+      const res = await fetch(`/api/products?${params.toString()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load products');
       const data = await res.json();
       setProducts(data);
@@ -47,6 +49,25 @@ function ProductsContent() {
 
   return (
     <div className="space-y-4">
+      {/* Banner for newly saved batch items */}
+      {showSavedBanner && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between gap-3 text-emerald-950 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <p className="text-xs font-black">Batch products saved to catalogue!</p>
+              <p className="text-[11px] text-emerald-800">Your newly added items are active and listed at the top below.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowSavedBanner(false)}
+            className="text-xs font-bold text-emerald-700 hover:text-emerald-900 px-2 py-1 rounded-lg hover:bg-emerald-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Top Header with Action Buttons */}
       <div className="flex items-center justify-between">
         <div>

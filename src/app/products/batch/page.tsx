@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
+  ArrowRight,
   Mic,
   MicOff,
   Plus,
@@ -41,6 +42,8 @@ export default function BatchProductEntryPage() {
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [showVoiceDebug, setShowVoiceDebug] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [savedItemsCount, setSavedItemsCount] = useState(0);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [report, setReport] = useState<{
@@ -50,56 +53,104 @@ export default function BatchProductEntryPage() {
     failed: Array<{ index: number; name: string; error: string }>;
   } | null>(null);
 
-  // Helper to add clean items into the rows table
+  // Helper to add clean items into the rows table with smart price/quantity detection
   const addItemsToRows = (itemNames: string[]) => {
-    const cleanedNames = itemNames
-      .map((name) => correctSpokenProduct(name))
-      .filter((name) => name.trim().length > 1);
+    const parsedItems = itemNames
+      .map((raw) => {
+        let name = raw;
+        let priceRupees = '';
+        let stock = '1';
 
-    if (cleanedNames.length === 0) return;
+        // Check if price was spoken: e.g. "1250 rupees", "rs 850", "price 450", "₹350"
+        const priceMatch = name.match(
+          /(?:(?:price|rs\.?|rupees|inr|₹)\s*(\d+(?:\.\d+)?))|(?:\b(\d+(?:\.\d+)?)\s*(?:rupees|rs\.?|inr|₹)\b)/i
+        );
+        if (priceMatch) {
+          priceRupees = priceMatch[1] || priceMatch[2] || '';
+          name = name.replace(priceMatch[0], ' ');
+        }
+
+        // Check if quantity was spoken: e.g. "5 pieces", "10 qty", "quantity 4"
+        const qtyMatch = name.match(
+          /(?:(?:qty|quantity|pieces|pcs)\s*(\d+))|(?:\b(\d+)\s*(?:pieces|pcs|qty)\b)/i
+        );
+        if (qtyMatch) {
+          stock = qtyMatch[1] || qtyMatch[2] || '1';
+          name = name.replace(qtyMatch[0], ' ');
+        }
+
+        const cleanedName = correctSpokenProduct(
+          name.replace(/[\s\-_,]+/g, ' ').trim()
+        );
+
+        return { name: cleanedName, priceRupees, stock };
+      })
+      .filter((item) => item.name.length > 1);
+
+    if (parsedItems.length === 0) return;
 
     setRows((prev) => {
       let updated = [...prev];
-      let nameIdx = 0;
+      let itemIdx = 0;
 
       // Fill empty initial row if present
       if (updated.length === 1 && !updated[0].name.trim()) {
+        const item = parsedItems[0];
+        let category = 'Other';
+        if (/ganesh|ganpati|laxmi|krishna|hanuman|buddha|idol|murti|mandir/i.test(item.name)) {
+          category = 'Religious Idols';
+        } else if (/clock|watch/i.test(item.name)) {
+          category = 'Clocks';
+        } else if (/diya|lamp|diffuser/i.test(item.name)) {
+          category = 'Lamps & Diyas';
+        } else if (/frame/i.test(item.name)) {
+          category = 'Photo Frames';
+        } else if (/mug|cup/i.test(item.name)) {
+          category = 'Mugs';
+        } else if (/keychain/i.test(item.name)) {
+          category = 'Keychains';
+        } else if (/thali|puja|pooja/i.test(item.name)) {
+          category = 'Puja Items';
+        }
+
         updated[0] = {
           ...updated[0],
-          name: cleanedNames[0],
+          name: item.name,
+          category,
+          priceRupees: item.priceRupees || updated[0].priceRupees,
+          stock: item.stock || updated[0].stock,
         };
-        nameIdx = 1;
+        itemIdx = 1;
       }
 
       // Append remaining names as new rows
-      while (nameIdx < cleanedNames.length && updated.length < 25) {
-        const name = cleanedNames[nameIdx];
-        // Guess sensible category based on keywords
+      while (itemIdx < parsedItems.length && updated.length < 25) {
+        const item = parsedItems[itemIdx];
         let category = 'Other';
-        if (/ganesh|ganpati|laxmi|krishna|hanuman|buddha|idol|murti|mandir/i.test(name)) {
+        if (/ganesh|ganpati|laxmi|krishna|hanuman|buddha|idol|murti|mandir/i.test(item.name)) {
           category = 'Religious Idols';
-        } else if (/clock|watch/i.test(name)) {
+        } else if (/clock|watch/i.test(item.name)) {
           category = 'Clocks';
-        } else if (/diya|lamp|diffuser/i.test(name)) {
+        } else if (/diya|lamp|diffuser/i.test(item.name)) {
           category = 'Lamps & Diyas';
-        } else if (/frame/i.test(name)) {
+        } else if (/frame/i.test(item.name)) {
           category = 'Photo Frames';
-        } else if (/mug|cup/i.test(name)) {
+        } else if (/mug|cup/i.test(item.name)) {
           category = 'Mugs';
-        } else if (/keychain/i.test(name)) {
+        } else if (/keychain/i.test(item.name)) {
           category = 'Keychains';
-        } else if (/thali|puja|pooja/i.test(name)) {
+        } else if (/thali|puja|pooja/i.test(item.name)) {
           category = 'Puja Items';
         }
 
         updated.push({
-          id: 'row-' + Date.now() + '-' + nameIdx + '-' + Math.random().toString(36).substring(2, 5),
-          name,
+          id: 'row-' + Date.now() + '-' + itemIdx + '-' + Math.random().toString(36).substring(2, 5),
+          name: item.name,
           category,
-          priceRupees: '',
-          stock: '1',
+          priceRupees: item.priceRupees,
+          stock: item.stock,
         });
-        nameIdx++;
+        itemIdx++;
       }
 
       return updated;
@@ -227,8 +278,12 @@ export default function BatchProductEntryPage() {
         failed: data.failed || [],
       });
 
-      if (data.savedCount > 0 && data.failedCount === 0) {
-        setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }]);
+      if (data.savedCount > 0) {
+        setSavedItemsCount(data.savedCount);
+        setShowSuccessModal(true);
+        if (data.failedCount === 0) {
+          setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }]);
+        }
       }
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Batch save failed');
@@ -236,6 +291,8 @@ export default function BatchProductEntryPage() {
       setIsSubmitting(false);
     }
   };
+
+  const filledRows = rows.filter((r) => r.name.trim());
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
@@ -419,9 +476,20 @@ export default function BatchProductEntryPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Items to Save ({rows.filter((r) => r.name.trim()).length} filled of {rows.length})
+            Items to Save ({filledRows.length} filled of {rows.length})
           </span>
           <div className="flex items-center gap-2">
+            {filledRows.length > 0 && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleSaveBatch}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-black shadow-xs flex items-center gap-1.5 transition-all"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Save ({filledRows.length})</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }])}
@@ -508,7 +576,7 @@ export default function BatchProductEntryPage() {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 pb-12">
         <button
           type="button"
           onClick={addManualRow}
@@ -519,13 +587,84 @@ export default function BatchProductEntryPage() {
 
         <button
           type="button"
-          disabled={isSubmitting}
+          disabled={isSubmitting || filledRows.length === 0}
           onClick={handleSaveBatch}
-          className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-extrabold rounded-xl shadow-sm disabled:opacity-50"
+          className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-extrabold rounded-xl shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {isSubmitting ? 'Saving All...' : 'Save All Products to Catalogue'}
+          {isSubmitting ? (
+            'Saving All...'
+          ) : (
+            <>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Save {filledRows.length > 0 ? `${filledRows.length} Products` : 'All Products'} to Catalogue</span>
+            </>
+          )}
         </button>
       </div>
+
+      {/* Sticky Bottom Bar on mobile/desktop when items are ready */}
+      {filledRows.length > 0 && !showSuccessModal && (
+        <div className="fixed bottom-4 left-0 right-0 max-w-3xl mx-auto px-4 z-40 animate-in slide-in-from-bottom-2">
+          <div className="bg-slate-900 text-white rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3 border border-slate-700">
+            <div className="flex items-center gap-2.5 pl-1">
+              <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center">
+                {filledRows.length}
+              </span>
+              <span className="text-xs font-bold text-slate-200">
+                {filledRows.length === 1 ? '1 item ready' : `${filledRows.length} items ready`}
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleSaveBatch}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{isSubmitting ? 'Saving...' : 'Save to Catalogue'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SUCCESS CONFIRMATION */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xl font-black text-slate-900">
+                Products Saved Successfully!
+              </h3>
+              <p className="text-sm text-slate-600 font-medium">
+                <strong>{savedItemsCount}</strong> gift products were added to your catalogue and inventory ledger.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => router.push('/products?saved=batch')}
+                className="w-full py-3.5 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-black text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-transform"
+              >
+                <span>View Products Catalogue</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSuccessModal(false);
+                  setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }]);
+                }}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl"
+              >
+                + Add Another Spoken Batch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: PASTE MULTIPLE ITEMS */}
       {showPasteModal && (

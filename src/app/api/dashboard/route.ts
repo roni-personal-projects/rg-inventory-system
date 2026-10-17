@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getDashboardSummary } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const summary = await getDashboardSummary();
-    return NextResponse.json(summary);
+    return NextResponse.json(summary, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load dashboard summary';
     return NextResponse.json({ error: message }, { status: 500 });

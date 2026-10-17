@@ -1,19 +1,26 @@
+import fs from 'fs';
+import path from 'path';
 import type { Product, Sale, SaleItem, StockMovement, MovementType, CheckoutResult } from '@/types';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 // Local in-memory repository store for standalone development / testing when Supabase credentials are not yet supplied
-interface MockStore {
+export interface MockStore {
+  skuCounter: number;
   products: Product[];
   sales: Sale[];
   saleItems: SaleItem[];
   movements: StockMovement[];
-  skuCounter: number;
 }
 
-// Initial seed store (only used in local offline mode)
-const globalStore: MockStore = {
-  skuCounter: 1016,
-  products: [
+declare global {
+  // eslint-disable-next-line no-var
+  var __RUCHI_STORE__: MockStore | undefined;
+}
+
+const STORE_FILE_PATH = path.join(process.cwd(), '.data', 'store.json');
+
+function getDefaultStore(): MockStore {
+  const defaultProducts: Product[] = [
     {
       id: 'prod-001',
       sku: 'RGC-01001',
@@ -170,15 +177,9 @@ const globalStore: MockStore = {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
-  ],
-  sales: [],
-  saleItems: [],
-  movements: [],
-};
+  ];
 
-// Seed initial stock movements for local store
-globalStore.products.forEach(p => {
-  globalStore.movements.push({
+  const defaultMovements: StockMovement[] = defaultProducts.map(p => ({
     id: 'mov-init-' + p.id,
     product_id: p.id,
     quantity_change: p.current_stock,
@@ -191,13 +192,76 @@ globalStore.products.forEach(p => {
       name: p.name,
       sku: p.sku
     }
-  });
+  }));
+
+  return {
+    skuCounter: 1016,
+    products: defaultProducts,
+    sales: [],
+    saleItems: [],
+    movements: defaultMovements,
+  };
+}
+
+export function getStore(): MockStore {
+  if (globalThis.__RUCHI_STORE__) {
+    return globalThis.__RUCHI_STORE__;
+  }
+
+  try {
+    if (typeof fs !== 'undefined' && fs.existsSync && fs.existsSync(STORE_FILE_PATH)) {
+      const content = fs.readFileSync(STORE_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed && Array.isArray(parsed.products) && typeof parsed.skuCounter === 'number') {
+        globalThis.__RUCHI_STORE__ = parsed;
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read existing store from file, using initial store:', err);
+  }
+
+  const initial = getDefaultStore();
+  globalThis.__RUCHI_STORE__ = initial;
+  saveStore();
+  return initial;
+}
+
+export function saveStore(): void {
+  try {
+    if (!globalThis.__RUCHI_STORE__) return;
+    if (typeof fs !== 'undefined' && fs.writeFileSync) {
+      const dir = path.dirname(STORE_FILE_PATH);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(STORE_FILE_PATH, JSON.stringify(globalThis.__RUCHI_STORE__, null, 2), 'utf-8');
+    }
+  } catch (err) {
+    console.error('Failed to write store to disk:', err);
+  }
+}
+
+// Global store proxy for seamless access across all route bundles and tests
+export const globalStore = new Proxy({} as MockStore, {
+  get(_target, prop: keyof MockStore) {
+    return getStore()[prop];
+  },
+  set(_target, prop: keyof MockStore, value) {
+    (getStore() as any)[prop] = value;
+    saveStore();
+    return true;
+  }
 });
 
 // Mutex lock for local store concurrency safety
 let localStoreLock = Promise.resolve();
 function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const result = localStoreLock.then(fn);
+  const result = localStoreLock.then(async () => {
+    const val = await fn();
+    saveStore();
+    return val;
+  });
   localStoreLock = result.catch(() => {}).then(() => {});
   return result;
 }

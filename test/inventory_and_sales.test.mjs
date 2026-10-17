@@ -498,3 +498,77 @@ test('8. Speech Post-Processor & Gift Shop Dictionary Correction', async (t) => 
     assert.ok(suggestions.some(s => s.includes('Ganesh')));
   });
 });
+
+test('9. Batch Voice Product Entry & Persistence', async (t) => {
+  await t.test('batch creation saves multiple products and verifies they appear in getProducts', async () => {
+    const batchItems = [
+      { name: 'Batch Brass Hanuman Idol 7 inch', category: 'Religious Idols', selling_price: 95000, current_stock: 6 },
+      { name: 'Batch Crystal Lotus Diya Big', category: 'Lamps & Diyas', selling_price: 45000, current_stock: 12 },
+      { name: 'Batch Om Wooden Wall Frame', category: 'Photo Frames', selling_price: 60000, current_stock: 4 },
+    ];
+
+    const saved = [];
+    for (const item of batchItems) {
+      const prod = await createProduct({
+        name: item.name,
+        category: item.category,
+        selling_price: item.selling_price,
+        current_stock: item.current_stock,
+      });
+      saved.push(prod);
+    }
+
+    assert.equal(saved.length, 3);
+
+    // Verify all 3 appear in product catalogue
+    const allProducts = await getProducts();
+    for (const item of batchItems) {
+      const found = allProducts.find((p) => p.name === item.name);
+      assert.ok(found, `Expected ${item.name} to be found in catalogue`);
+      assert.equal(found.selling_price, item.selling_price);
+      assert.equal(found.current_stock, item.current_stock);
+    }
+  });
+
+  await t.test('parses spoken price and quantity strings accurately', () => {
+    function parseSpokenInput(raw) {
+      let name = raw;
+      let priceRupees = '';
+      let stock = '1';
+
+      const priceMatch = name.match(
+        /(?:(?:price|rs\.?|rupees|inr|₹)\s*(\d+(?:\.\d+)?))|(?:\b(\d+(?:\.\d+)?)\s*(?:rupees|rs\.?|inr|₹)\b)/i
+      );
+      if (priceMatch) {
+        priceRupees = priceMatch[1] || priceMatch[2] || '';
+        name = name.replace(priceMatch[0], ' ');
+      }
+
+      const qtyMatch = name.match(
+        /(?:(?:qty|quantity|pieces|pcs)\s*(\d+))|(?:\b(\d+)\s*(?:pieces|pcs|qty)\b)/i
+      );
+      if (qtyMatch) {
+        stock = qtyMatch[1] || qtyMatch[2] || '1';
+        name = name.replace(qtyMatch[0], ' ');
+      }
+
+      name = name.replace(/[\s\-_,]+/g, ' ').trim();
+      return { name, priceRupees, stock };
+    }
+
+    const res1 = parseSpokenInput('Brass Ganesh Idol 6 inch 1250 rupees 5 pieces');
+    assert.equal(res1.name, 'Brass Ganesh Idol 6 inch');
+    assert.equal(res1.priceRupees, '1250');
+    assert.equal(res1.stock, '5');
+
+    const res2 = parseSpokenInput('Antique Wall Clock price 850');
+    assert.equal(res2.name, 'Antique Wall Clock');
+    assert.equal(res2.priceRupees, '850');
+    assert.equal(res2.stock, '1');
+
+    const res3 = parseSpokenInput('Lotus Diya 10 pcs');
+    assert.equal(res3.name, 'Lotus Diya');
+    assert.equal(res3.stock, '10');
+  });
+});
+
