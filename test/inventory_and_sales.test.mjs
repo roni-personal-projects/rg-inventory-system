@@ -468,3 +468,33 @@ test('7. Speed Test: Routine Product Entry Benchmark (20 Products)', async (t) =
     `Benchmark target: at least 18/20 under 10s. Actual: ${passedUnder10s}/20`
   );
 });
+
+test('8. Speech Post-Processor & Gift Shop Dictionary Correction', async (t) => {
+  const { correctSpokenProduct, pickBestAlternative, getGiftSuggestions } = await import('../src/lib/speechCorrection.ts');
+
+  await t.test('corrects phonetic misrecognitions of Indian gift terms', () => {
+    assert.equal(correctSpokenProduct('garnish idol 6 inches'), 'Ganesh Idol 6 inch');
+    assert.equal(correctSpokenProduct('brass the ya'), 'Brass Diya');
+    assert.equal(correctSpokenProduct('pooja tali set'), 'Puja Thali Set');
+    assert.equal(correctSpokenProduct('radhe krishna murti'), 'Radha Krishna Murti');
+    assert.equal(correctSpokenProduct('photoframe eight inches'), 'Photo Frame 8 inch');
+    assert.equal(correctSpokenProduct('wallclock'), 'Wall Clock');
+    assert.equal(correctSpokenProduct('silver plated coin'), 'Silver Plated Coin');
+  });
+
+  await t.test('picks best alternative from speech recognition choices', () => {
+    const alternatives = [
+      'brass garnish idol', // raw poor transcription
+      'brass ganesh idol',  // accurate alternative
+      'pass garnish idol',  // poor alternative
+    ];
+    const best = pickBestAlternative(alternatives);
+    assert.equal(best, 'Brass Ganesh Idol');
+  });
+
+  await t.test('generates relevant suggestions for quick 1-tap correction', () => {
+    const suggestions = getGiftSuggestions('Ganesh');
+    assert.ok(suggestions.length > 0);
+    assert.ok(suggestions.some(s => s.includes('Ganesh')));
+  });
+});

@@ -3,9 +3,21 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Mic, MicOff, Plus, Trash2, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  Mic,
+  MicOff,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  Volume2,
+  Globe,
+} from 'lucide-react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { rupeesToPaise } from '@/lib/money';
+import { correctSpokenProduct } from '@/lib/speechCorrection';
 import { PRODUCT_CATEGORIES } from '@/types';
 
 interface BatchRow {
@@ -31,23 +43,33 @@ export default function BatchProductEntryPage() {
     failed: Array<{ index: number; name: string; error: string }>;
   } | null>(null);
 
-  // Voice capture
-  const { isSupported, isListening, startListening, stopListening, error: voiceError } = useVoiceInput({
+  // Enhanced Continuous Voice capture
+  const {
+    isSupported,
+    isListening,
+    audioLevel,
+    startListening,
+    stopListening,
+    error: voiceError,
+    clearError,
+    selectedLang,
+    setSelectedLang,
+  } = useVoiceInput({
     lang: 'en-IN',
     continuous: true,
     onResult: (spokenText) => {
-      // If user speaks comma or says 'next', we split into items, or take the spoken phrase
+      // Split items by commas, newlines, or words like "and"
       const phrases = spokenText
         .split(/[,;\n]|(?:\band\b)/i)
-        .map((s) => s.trim())
+        .map((s) => correctSpokenProduct(s.trim()))
         .filter(Boolean);
 
       if (phrases.length > 0) {
         setRows((prev) => {
-          // If first row is blank, fill it first
           const updated = [...prev];
           let pIdx = 0;
 
+          // Fill first row if empty
           for (let i = 0; i < updated.length && pIdx < phrases.length; i++) {
             if (!updated[i].name) {
               updated[i].name = phrases[pIdx];
@@ -104,7 +126,6 @@ export default function BatchProductEntryPage() {
   const handleSaveBatch = async () => {
     if (isListening) stopListening();
 
-    // Filter out rows where name is empty
     const filledRows = rows.filter((r) => r.name.trim());
     if (filledRows.length === 0) {
       alert('Please enter at least one product name before saving.');
@@ -140,7 +161,6 @@ export default function BatchProductEntryPage() {
         failed: data.failed || [],
       });
 
-      // If all saved successfully, clear and offer to go back
       if (data.savedCount > 0 && data.failedCount === 0) {
         setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }]);
       }
@@ -175,33 +195,74 @@ export default function BatchProductEntryPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={isListening ? stopListening : startListening}
-          className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 text-sm shadow-sm transition-all whitespace-nowrap ${
-            isListening
-              ? 'bg-rose-600 text-white animate-pulse'
-              : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
-          }`}
-        >
-          {isListening ? (
-            <>
-              <MicOff className="w-4 h-4" />
-              <span>Stop Recording</span>
-            </>
-          ) : (
-            <>
-              <Mic className="w-4 h-4" />
-              <span>Start Voice Capture</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Language Selector */}
+          <div className="flex items-center gap-1 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-xl border border-amber-200">
+            <Globe className="w-3.5 h-3.5 text-slate-400" />
+            <select
+              value={selectedLang}
+              onChange={(e) => setSelectedLang(e.target.value)}
+              className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none"
+            >
+              <option value="en-IN">English (India)</option>
+              <option value="hi-IN">Hindi (हिन्दी)</option>
+              <option value="en-US">English (US)</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={isListening ? stopListening : startListening}
+            className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 text-sm shadow-sm transition-all whitespace-nowrap ${
+              isListening
+                ? 'bg-rose-600 text-white animate-pulse'
+                : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
+            }`}
+          >
+            {isListening ? (
+              <>
+                <MicOff className="w-4 h-4" />
+                <span>Stop Recording</span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4" />
+                <span>Start Voice Capture</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
+      {/* Audio Waveform Indicator */}
+      {isListening && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5 animate-in fade-in">
+          <div className="flex items-center justify-between text-xs text-rose-700 font-bold">
+            <span className="flex items-center gap-1.5">
+              <Volume2 className="w-4 h-4 text-rose-600" />
+              <span>Listening continuously... Speak each product name clearly</span>
+            </span>
+            <span className="text-[10px] font-mono text-rose-500">{selectedLang}</span>
+          </div>
+
+          <div className="w-full bg-rose-200 h-2 rounded-full overflow-hidden">
+            <div
+              className="bg-rose-600 h-full transition-all duration-75 rounded-full"
+              style={{ width: `${Math.max(10, audioLevel)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {voiceError && (
-        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-          <span>{voiceError} (You can enter items manually in the table below)</span>
+        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span>{voiceError} (You can enter items manually in the table below)</span>
+          </div>
+          <button onClick={clearError} className="underline font-bold text-rose-900">
+            Dismiss
+          </button>
         </div>
       )}
 
