@@ -12,8 +12,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
-  Volume2,
+  Sparkles,
   Globe,
+  ClipboardList,
+  Sparkle,
+  Bug,
 } from 'lucide-react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { rupeesToPaise } from '@/lib/money';
@@ -35,6 +38,10 @@ export default function BatchProductEntryPage() {
     { id: '1', name: '', category: 'Religious Idols', priceRupees: '', stock: '1' },
   ]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [showVoiceDebug, setShowVoiceDebug] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [report, setReport] = useState<{
     total: number;
@@ -43,59 +50,89 @@ export default function BatchProductEntryPage() {
     failed: Array<{ index: number; name: string; error: string }>;
   } | null>(null);
 
-  // Enhanced Continuous Voice capture
+  // Helper to add clean items into the rows table
+  const addItemsToRows = (itemNames: string[]) => {
+    const cleanedNames = itemNames
+      .map((name) => correctSpokenProduct(name))
+      .filter((name) => name.trim().length > 1);
+
+    if (cleanedNames.length === 0) return;
+
+    setRows((prev) => {
+      let updated = [...prev];
+      let nameIdx = 0;
+
+      // Fill empty initial row if present
+      if (updated.length === 1 && !updated[0].name.trim()) {
+        updated[0] = {
+          ...updated[0],
+          name: cleanedNames[0],
+        };
+        nameIdx = 1;
+      }
+
+      // Append remaining names as new rows
+      while (nameIdx < cleanedNames.length && updated.length < 25) {
+        const name = cleanedNames[nameIdx];
+        // Guess sensible category based on keywords
+        let category = 'Other';
+        if (/ganesh|ganpati|laxmi|krishna|hanuman|buddha|idol|murti|mandir/i.test(name)) {
+          category = 'Religious Idols';
+        } else if (/clock|watch/i.test(name)) {
+          category = 'Clocks';
+        } else if (/diya|lamp|diffuser/i.test(name)) {
+          category = 'Lamps & Diyas';
+        } else if (/frame/i.test(name)) {
+          category = 'Photo Frames';
+        } else if (/mug|cup/i.test(name)) {
+          category = 'Mugs';
+        } else if (/keychain/i.test(name)) {
+          category = 'Keychains';
+        } else if (/thali|puja|pooja/i.test(name)) {
+          category = 'Puja Items';
+        }
+
+        updated.push({
+          id: 'row-' + Date.now() + '-' + nameIdx + '-' + Math.random().toString(36).substring(2, 5),
+          name,
+          category,
+          priceRupees: '',
+          stock: '1',
+        });
+        nameIdx++;
+      }
+
+      return updated;
+    });
+  };
+
+  // Continuous Voice Capture: handles finalized phrases cleanly
   const {
     isSupported,
     isListening,
-    audioLevel,
+    interimTranscript,
     startListening,
     stopListening,
     error: voiceError,
     clearError,
     selectedLang,
     setSelectedLang,
+    debugLogs,
   } = useVoiceInput({
     lang: 'en-IN',
     continuous: true,
-    onResult: (spokenText) => {
-      // Split items by commas, newlines, or words like "and"
-      const phrases = spokenText
-        .split(/[,;\n]|(?:\band\b)/i)
-        .map((s) => correctSpokenProduct(s.trim()))
+    onFinalPhrase: (finalPhrase) => {
+      // Split phrase if user said "and", "aur", commas, or numbers
+      const phrases = finalPhrase
+        .split(/[,;\n]|(?:\s+\band\b\s+)|(?:\s+\baur\b\s+)|(?:\s+\bnext\b\s+)|(?:\b\d+[\.\)]\s+)/i)
+        .map((s) => s.trim())
         .filter(Boolean);
 
-      if (phrases.length > 0) {
-        setRows((prev) => {
-          const updated = [...prev];
-          let pIdx = 0;
-
-          // Fill first row if empty
-          for (let i = 0; i < updated.length && pIdx < phrases.length; i++) {
-            if (!updated[i].name) {
-              updated[i].name = phrases[pIdx];
-              pIdx++;
-            }
-          }
-
-          // Add extra phrases as new rows (up to 20)
-          while (pIdx < phrases.length && updated.length < 20) {
-            updated.push({
-              id: 'row-' + Date.now() + '-' + pIdx,
-              name: phrases[pIdx],
-              category: 'Other',
-              priceRupees: '',
-              stock: '1',
-            });
-            pIdx++;
-          }
-
-          return updated;
-        });
-      }
+      addItemsToRows(phrases);
     },
   });
 
-  const addRow = () => {
+  const addManualRow = () => {
     if (rows.length >= 25) return;
     setRows((prev) => [
       ...prev,
@@ -121,6 +158,35 @@ export default function BatchProductEntryPage() {
     setRows((prev) =>
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
     );
+  };
+
+  const loadSampleItems = () => {
+    const samples = [
+      'Brass Ganesh Idol 6 inch',
+      'Antique Wooden Wall Clock',
+      'Glass Lotus Diya',
+      'Personalized Magic Mug',
+      'Om & Swastik Metallic Keychain',
+    ];
+    setRows([
+      { id: '1', name: samples[0], category: 'Religious Idols', priceRupees: '1250', stock: '5' },
+      { id: '2', name: samples[1], category: 'Clocks', priceRupees: '850', stock: '3' },
+      { id: '3', name: samples[2], category: 'Lamps & Diyas', priceRupees: '350', stock: '10' },
+      { id: '4', name: samples[3], category: 'Mugs', priceRupees: '299', stock: '12' },
+      { id: '5', name: samples[4], category: 'Keychains', priceRupees: '99', stock: '20' },
+    ]);
+  };
+
+  const handlePasteSubmit = () => {
+    if (!pasteText.trim()) return;
+    const lines = pasteText
+      .split(/[\n,;]|(?:\s+\band\b\s+)/i)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    addItemsToRows(lines);
+    setPasteText('');
+    setShowPasteModal(false);
   };
 
   const handleSaveBatch = async () => {
@@ -186,79 +252,127 @@ export default function BatchProductEntryPage() {
         <div className="w-12"></div>
       </div>
 
-      {/* Voice & Manual Instructions banner */}
-      <div className="p-4 bg-amber-500/10 border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-amber-900">Voice or Fast Grid Entry</h3>
-          <p className="text-xs text-amber-800 mt-0.5">
-            Tap Speak and say product names separated by pauses or &quot;and&quot;. You can review, adjust prices, and correct any names before saving.
-          </p>
+      {/* Voice Capture Control Card */}
+      <div className="p-4 bg-amber-500/10 border border-amber-300 rounded-2xl space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-amber-950">Continuous Voice Intake</h3>
+            <p className="text-xs text-amber-900 mt-0.5">
+              Tap <strong>Start Voice Capture</strong> and speak product names. Pause between items or say <em>&quot;and&quot;</em> / <em>&quot;next&quot;</em>.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Language Selector */}
+            <div className="flex items-center gap-1 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-xl border border-amber-200 shadow-xs">
+              <Globe className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={selectedLang}
+                onChange={(e) => setSelectedLang(e.target.value)}
+                className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none"
+              >
+                <option value="en-IN">English (India)</option>
+                <option value="en-US">English (US)</option>
+                <option value="hi-IN">Hindi (हिन्दी)</option>
+              </select>
+            </div>
+
+            {/* Mic Toggle Button */}
+            <button
+              type="button"
+              onClick={isListening ? stopListening : startListening}
+              className={`px-4 py-2.5 rounded-xl font-extrabold flex items-center justify-center gap-2 text-xs sm:text-sm shadow-sm transition-all whitespace-nowrap ${
+                isListening
+                  ? 'bg-rose-600 text-white animate-pulse'
+                  : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
+              }`}
+            >
+              {isListening ? (
+                <>
+                  <MicOff className="w-4 h-4" />
+                  <span>Stop Capture</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4" />
+                  <span>Start Voice Capture</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Language Selector */}
-          <div className="flex items-center gap-1 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-xl border border-amber-200">
-            <Globe className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={selectedLang}
-              onChange={(e) => setSelectedLang(e.target.value)}
-              className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none"
+        {/* Live Speaking Indicator */}
+        {isListening && (
+          <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1 animate-in fade-in">
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center gap-1.5 text-rose-700">
+                <Sparkles className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                <span>Microphone active — speaking items will populate the table below:</span>
+              </span>
+              <span className="text-[10px] font-mono text-rose-500 uppercase">{selectedLang}</span>
+            </div>
+            {interimTranscript && (
+              <p className="text-slate-700 font-mono text-[11px] bg-white p-1.5 rounded border border-rose-200">
+                Hearing: &quot;{interimTranscript}&quot;
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Quick Actions Bar */}
+        <div className="flex items-center justify-between pt-1 text-xs">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPasteModal(true)}
+              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg font-bold flex items-center gap-1"
             >
-              <option value="en-IN">English (India)</option>
-              <option value="hi-IN">Hindi (हिन्दी)</option>
-              <option value="en-US">English (US)</option>
-            </select>
+              <ClipboardList className="w-3.5 h-3.5 text-slate-500" />
+              <span>Paste List</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={loadSampleItems}
+              className="px-2.5 py-1 bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 rounded-lg font-bold flex items-center gap-1"
+            >
+              <Sparkle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Load 5 Sample Items</span>
+            </button>
           </div>
 
           <button
             type="button"
-            onClick={isListening ? stopListening : startListening}
-            className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 text-sm shadow-sm transition-all whitespace-nowrap ${
-              isListening
-                ? 'bg-rose-600 text-white animate-pulse'
-                : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
-            }`}
+            onClick={() => setShowVoiceDebug(!showVoiceDebug)}
+            className="text-[11px] text-amber-800 hover:underline flex items-center gap-1"
           >
-            {isListening ? (
-              <>
-                <MicOff className="w-4 h-4" />
-                <span>Stop Recording</span>
-              </>
-            ) : (
-              <>
-                <Mic className="w-4 h-4" />
-                <span>Start Voice Capture</span>
-              </>
-            )}
+            <Bug className="w-3 h-3" />
+            <span>Voice Log</span>
           </button>
         </div>
+
+        {/* Debug Console */}
+        {showVoiceDebug && (
+          <div className="p-3 bg-slate-900 text-emerald-400 font-mono text-[10px] rounded-xl space-y-1 max-h-32 overflow-y-auto">
+            <div className="text-slate-400 font-bold border-b border-slate-800 pb-0.5 flex justify-between">
+              <span>Batch Voice Event Stream</span>
+              <span>Supported: {isSupported ? 'YES' : 'NO'}</span>
+            </div>
+            {debugLogs.length === 0 ? (
+              <p className="text-slate-500">Tap &quot;Start Voice Capture&quot; to see real-time events...</p>
+            ) : (
+              debugLogs.map((log, idx) => <p key={idx}>{log}</p>)
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Audio Waveform Indicator */}
-      {isListening && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5 animate-in fade-in">
-          <div className="flex items-center justify-between text-xs text-rose-700 font-bold">
-            <span className="flex items-center gap-1.5">
-              <Volume2 className="w-4 h-4 text-rose-600" />
-              <span>Listening continuously... Speak each product name clearly</span>
-            </span>
-            <span className="text-[10px] font-mono text-rose-500">{selectedLang}</span>
-          </div>
-
-          <div className="w-full bg-rose-200 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-rose-600 h-full transition-all duration-75 rounded-full"
-              style={{ width: `${Math.max(10, audioLevel)}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {voiceError && (
         <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-            <span>{voiceError} (You can enter items manually in the table below)</span>
+            <span>{voiceError}</span>
           </div>
           <button onClick={clearError} className="underline font-bold text-rose-900">
             Dismiss
@@ -305,22 +419,31 @@ export default function BatchProductEntryPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Items to Save ({rows.length} / 25)
+            Items to Save ({rows.filter((r) => r.name.trim()).length} filled of {rows.length})
           </span>
-          <button
-            type="button"
-            onClick={addRow}
-            className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Row</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setRows([{ id: '1', name: '', category: 'Other', priceRupees: '', stock: '1' }])}
+              className="text-xs text-rose-600 hover:underline font-semibold"
+            >
+              Clear All
+            </button>
+            <button
+              type="button"
+              onClick={addManualRow}
+              className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Row</span>
+            </button>
+          </div>
         </div>
 
         <div className="divide-y divide-slate-100">
           {rows.map((row, index) => (
             <div key={row.id} className="p-3.5 flex flex-col md:flex-row md:items-center gap-2 hover:bg-slate-50/50">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-1">
                 <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-bold flex items-center justify-center shrink-0">
                   {index + 1}
                 </span>
@@ -328,12 +451,12 @@ export default function BatchProductEntryPage() {
                   type="text"
                   value={row.name}
                   onChange={(e) => updateRow(row.id, 'name', e.target.value)}
-                  placeholder="Product name"
-                  className="flex-1 md:w-64 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  placeholder="e.g. Brass Ganesh Idol 6 inch"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
               </div>
 
-              <div className="flex items-center gap-2 pl-8 md:pl-0 flex-1">
+              <div className="flex items-center gap-2 pl-8 md:pl-0">
                 <select
                   value={row.category}
                   onChange={(e) => updateRow(row.id, 'category', e.target.value)}
@@ -388,10 +511,10 @@ export default function BatchProductEntryPage() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={addRow}
+          onClick={addManualRow}
           className="flex-1 py-3 px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-bold rounded-xl"
         >
-          + Add Another Row
+          + Add Empty Row
         </button>
 
         <button
@@ -400,9 +523,51 @@ export default function BatchProductEntryPage() {
           onClick={handleSaveBatch}
           className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-extrabold rounded-xl shadow-sm disabled:opacity-50"
         >
-          {isSubmitting ? 'Saving...' : 'Save All Products'}
+          {isSubmitting ? 'Saving All...' : 'Save All Products to Catalogue'}
         </button>
       </div>
+
+      {/* MODAL: PASTE MULTIPLE ITEMS */}
+      {showPasteModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-slate-900">Paste List of Products</h3>
+              <button onClick={() => setShowPasteModal(false)} className="text-slate-400 hover:text-slate-600">
+                &times;
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Paste or type items separated by lines, commas, or &quot;and&quot;. They will automatically be parsed, categorized, and cleaned up into rows.
+            </p>
+
+            <textarea
+              rows={6}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder="Brass Ganesh Idol 6 inch&#10;Wooden Wall Clock 12 inch&#10;Personalized Magic Mug&#10;Glass Lotus Diya"
+              className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPasteModal(false)}
+                className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePasteSubmit}
+                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-sm"
+              >
+                Parse into Grid
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

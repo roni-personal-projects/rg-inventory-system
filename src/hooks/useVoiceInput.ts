@@ -14,12 +14,14 @@ export type VoiceState = 'idle' | 'starting' | 'listening' | 'recognizing' | 'er
 export function useVoiceInput(options?: {
   lang?: string;
   onResult?: (text: string, suggestions?: string[]) => void;
+  onFinalPhrase?: (phrase: string) => void;
   continuous?: boolean;
 }) {
   const [isSupported, setIsSupported] = useState<boolean>(false);
   const [state, setState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string>('');
+  const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [rawTranscript, setRawTranscript] = useState<string>('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedLang, setSelectedLang] = useState<string>(options?.lang || 'en-IN');
@@ -27,6 +29,8 @@ export function useVoiceInput(options?: {
 
   const recognitionRef = useRef<any>(null);
   const onResultRef = useRef(options?.onResult);
+  const onFinalPhraseRef = useRef(options?.onFinalPhrase);
+  const processedFinalIndexRef = useRef<number>(-1);
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -37,7 +41,8 @@ export function useVoiceInput(options?: {
 
   useEffect(() => {
     onResultRef.current = options?.onResult;
-  }, [options?.onResult]);
+    onFinalPhraseRef.current = options?.onFinalPhrase;
+  }, [options?.onResult, options?.onFinalPhrase]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -64,13 +69,16 @@ export function useVoiceInput(options?: {
       recognitionRef.current = null;
     }
     setState('idle');
+    setInterimTranscript('');
   }, []);
 
   const startListening = useCallback(() => {
     setError(null);
     setTranscript('');
+    setInterimTranscript('');
     setRawTranscript('');
     setSuggestions([]);
+    processedFinalIndexRef.current = -1;
 
     if (typeof window === 'undefined') return;
 
@@ -95,13 +103,13 @@ export function useVoiceInput(options?: {
 
     try {
       setState('starting');
-      addLog(`Initializing SpeechRecognition with lang: ${selectedLang}`);
+      addLog(`Initializing SpeechRecognition (continuous: ${Boolean(options?.continuous)}, lang: ${selectedLang})`);
 
       const recognition = new SpeechRecognitionClass();
       recognition.lang = selectedLang;
       recognition.continuous = Boolean(options?.continuous);
       recognition.interimResults = true;
-      recognition.maxAlternatives = 5; // Request multiple alternatives for post-processing
+      recognition.maxAlternatives = 5;
 
       recognition.onstart = () => {
         addLog('Microphone is listening...');
@@ -127,30 +135,49 @@ export function useVoiceInput(options?: {
       };
 
       recognition.onresult = (event: any) => {
-        const alternatives: string[] = [];
+        let currentInterim = '';
+        let latestFinalText = '';
 
         for (let i = 0; i < event.results.length; ++i) {
-          const result = event.results[i];
-          for (let a = 0; a < result.length; a++) {
-            if (result[a]?.transcript) {
-              alternatives.push(result[a].transcript);
+          const res = event.results[i];
+          if (res.isFinal) {
+            // Process newly finalized result
+            if (i > processedFinalIndexRef.current) {
+              processedFinalIndexRef.current = i;
+              const alts: string[] = [];
+              for (let a = 0; a < res.length; a++) {
+                if (res[a]?.transcript) alts.push(res[a].transcript);
+              }
+              const bestFinal = pickBestAlternative(alts.length > 0 ? alts : [res[0].transcript]);
+              latestFinalText = bestFinal;
+              addLog(`Finalized [${i}]: "${bestFinal}"`);
+
+              if (onFinalPhraseRef.current && bestFinal) {
+                onFinalPhraseRef.current(bestFinal);
+              }
             }
+          } else {
+            currentInterim += res[0].transcript;
           }
         }
 
-        const rawSpoken = event.results[event.results.length - 1]?.[0]?.transcript || '';
-        setRawTranscript(rawSpoken);
+        setInterimTranscript(currentInterim);
+        const lastRaw = event.results[event.results.length - 1]?.[0]?.transcript || '';
+        setRawTranscript(lastRaw);
 
-        // Apply domain gift vocabulary post-processing & alternative scoring
-        const corrected = pickBestAlternative(alternatives.length > 0 ? alternatives : [rawSpoken]);
-        const newSuggestions = getGiftSuggestions(corrected);
-
-        addLog(`Raw: "${rawSpoken}" -> Corrected: "${corrected}"`);
-
-        if (corrected) {
+        // In non-continuous mode, update transcript with current result
+        if (!options?.continuous) {
+          const alts: string[] = [];
+          for (let a = 0; a < event.results[0]?.length; a++) {
+            if (event.results[0][a]?.transcript) alts.push(event.results[0][a].transcript);
+          }
+          const corrected = pickBestAlternative(alts.length > 0 ? alts : [lastRaw]);
           setTranscript(corrected);
+
+          const newSuggestions = getGiftSuggestions(corrected);
           setSuggestions(newSuggestions);
-          if (onResultRef.current) {
+
+          if (onResultRef.current && corrected) {
             onResultRef.current(corrected, newSuggestions);
           }
         }
@@ -188,6 +215,7 @@ export function useVoiceInput(options?: {
       recognition.onend = () => {
         addLog('Speech recognition ended.');
         setState('idle');
+        setInterimTranscript('');
         recognitionRef.current = null;
       };
 
@@ -207,6 +235,7 @@ export function useVoiceInput(options?: {
     isListening: state === 'listening' || state === 'recognizing' || state === 'starting',
     state,
     transcript,
+    interimTranscript,
     rawTranscript,
     suggestions,
     error,
