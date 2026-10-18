@@ -20,6 +20,7 @@ import {
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { rupeesToPaise } from '@/lib/money';
 import { PRODUCT_CATEGORIES } from '@/types';
+import { clientStore } from '@/lib/clientStore';
 
 export default function AddProductPage() {
   const router = useRouter();
@@ -124,6 +125,7 @@ export default function AddProductPage() {
         throw new Error(data.error || 'Failed to save product');
       }
 
+      clientStore.invalidate();
       setSuccessToast(`Saved "${data.name}" (${data.sku}) successfully!`);
 
       if (addAnother) {
@@ -511,7 +513,7 @@ export default function AddProductPage() {
       {/* MODAL: MOBILE MIC PERMISSION GUIDE */}
       {showMobileMicHelp && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <span>📱</span>

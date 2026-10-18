@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSales, checkoutSale } from '@/lib/db';
+import { getCachedOrFetch, invalidateCache } from '@/lib/apiCache';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,8 +9,14 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get('endDate') || undefined;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 50;
 
-    const sales = await getSales({ startDate, endDate, limit });
-    return NextResponse.json(sales);
+    const cacheKey = `sales:${startDate || ''}:${endDate || ''}:${limit}`;
+    const sales = await getCachedOrFetch(cacheKey, 4000, () => getSales({ startDate, endDate, limit }));
+
+    return NextResponse.json(sales, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=3, stale-while-revalidate=10',
+      },
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch sales';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -33,6 +40,11 @@ export async function POST(request: NextRequest) {
       items: body.items,
       notes: body.notes,
     });
+
+    invalidateCache('sales');
+    invalidateCache('products');
+    invalidateCache('dashboard');
+    invalidateCache('stock');
 
     return NextResponse.json(result, { status: 201 });
   } catch (err: unknown) {

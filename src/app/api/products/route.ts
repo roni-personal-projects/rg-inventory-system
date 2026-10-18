@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProducts, createProduct } from '@/lib/db';
+import { getCachedOrFetch, invalidateCache } from '@/lib/apiCache';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -12,10 +13,14 @@ export async function GET(request: NextRequest) {
     const stockFilter = (searchParams.get('stockFilter') as 'all' | 'low' | 'out') || 'all';
     const includeArchived = searchParams.get('includeArchived') === 'true';
 
-    const products = await getProducts({ search, category, stockFilter, includeArchived });
+    const cacheKey = `products:${search || ''}:${category || ''}:${stockFilter}:${includeArchived}`;
+    const products = await getCachedOrFetch(cacheKey, 5000, () =>
+      getProducts({ search, category, stockFilter, includeArchived })
+    );
+
     return NextResponse.json(products, {
       headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Cache-Control': 'public, s-maxage=3, stale-while-revalidate=10',
       },
     });
   } catch (err: unknown) {
@@ -49,6 +54,9 @@ export async function POST(request: NextRequest) {
       barcode: body.barcode,
       image_url: body.image_url,
     });
+
+    invalidateCache('products');
+    invalidateCache('dashboard');
 
     return NextResponse.json(product, { status: 201 });
   } catch (err: unknown) {

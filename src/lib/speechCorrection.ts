@@ -168,12 +168,135 @@ const PHONETIC_MAP: Record<string, string> = {
 };
 
 /**
+ * Removes duplicate words, incomplete prefix stutters, and repeated phrases/bigrams
+ * commonly emitted by Mobile Chrome Web Speech API.
+ * e.g. "brass brass bras brass brass ganes ganesh ganesh idol" -> "brass ganesh idol"
+ */
+export function cleanSpokenDuplicates(text: string): string {
+  if (!text) return '';
+  let words = text.trim().split(/\s+/);
+
+  // 1. Remove repeated adjacent phrases of length 6 down to 2 words
+  // e.g. "antique wooden wall clock antique wooden wall clock" -> "antique wooden wall clock"
+  for (let len = 6; len >= 2; len--) {
+    let i = 0;
+    while (i + 2 * len <= words.length) {
+      const phrase1 = words.slice(i, i + len).join(' ').toLowerCase();
+      const phrase2 = words.slice(i + len, i + 2 * len).join(' ').toLowerCase();
+      if (phrase1 === phrase2) {
+        words.splice(i + len, len);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  // 2. Remove consecutive word repeats and prefix stutters
+  const result: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const prev = result.length > 0 ? result[result.length - 1] : '';
+    const lowerWord = word.toLowerCase();
+    const lowerPrev = prev.toLowerCase();
+
+    // Exact duplicate word
+    if (lowerWord === lowerPrev) {
+      continue;
+    }
+
+    // Previous word is incomplete prefix of current word (e.g. 'bras' then 'brass')
+    if (prev && lowerWord.startsWith(lowerPrev) && lowerPrev.length >= 2 && lowerWord.length > lowerPrev.length) {
+      result[result.length - 1] = word;
+      continue;
+    }
+
+    // Current word is incomplete suffix or shortened repeat of previous (e.g. 'brass' then 'bras')
+    if (prev && lowerPrev.startsWith(lowerWord) && lowerWord.length >= 2 && lowerPrev.length > lowerWord.length) {
+      continue;
+    }
+
+    result.push(word);
+  }
+
+  // 3. Final single word dedupe pass
+  const finalWords: string[] = [];
+  for (let i = 0; i < result.length; i++) {
+    if (i > 0 && result[i].toLowerCase() === finalWords[finalWords.length - 1]?.toLowerCase()) {
+      continue;
+    }
+    finalWords.push(result[i]);
+  }
+
+  return finalWords.join(' ');
+}
+
+/**
+ * Assembles speech recognition transcript chunks across both Mobile and Desktop browsers.
+ * Seamlessly merges cumulative snapshots (Mobile Chrome) and incremental chunks (Desktop Chrome)
+ * without duplicating overlapping sentences or words.
+ */
+export function assembleTranscript(chunks: string[]): string {
+  if (!chunks || chunks.length === 0) return '';
+  if (chunks.length === 1) return chunks[0].trim();
+
+  let combined = chunks[0].trim();
+
+  for (let i = 1; i < chunks.length; i++) {
+    const next = (chunks[i] || '').trim();
+    if (!next) continue;
+
+    const lowerCombined = combined.toLowerCase();
+    const lowerNext = next.toLowerCase();
+
+    // 1. If next is identical to combined or combined already ends with next, skip
+    if (lowerCombined === lowerNext || lowerCombined.endsWith(lowerNext)) {
+      continue;
+    }
+
+    // 2. Mobile snapshot: If next starts with combined, next is the newer cumulative snapshot!
+    if (lowerNext.startsWith(lowerCombined)) {
+      combined = next;
+      continue;
+    }
+
+    // 3. Mobile snapshot variant: If combined starts with next, combined is already longer
+    if (lowerCombined.startsWith(lowerNext)) {
+      continue;
+    }
+
+    // 4. Overlapping transition (e.g. combined = "brass ganesh", next = "ganesh idol")
+    const wordsCombined = combined.split(/\s+/);
+    const wordsNext = next.split(/\s+/);
+    let overlapFound = false;
+
+    const maxOverlap = Math.min(wordsCombined.length, wordsNext.length);
+    for (let len = maxOverlap; len >= 1; len--) {
+      const suffix = wordsCombined.slice(-len).join(' ').toLowerCase();
+      const prefix = wordsNext.slice(0, len).join(' ').toLowerCase();
+      if (suffix === prefix) {
+        combined = wordsCombined.concat(wordsNext.slice(len)).join(' ');
+        overlapFound = true;
+        break;
+      }
+    }
+
+    if (!overlapFound) {
+      combined = `${combined} ${next}`;
+    }
+  }
+
+  return combined.trim();
+}
+
+/**
  * Normalizes speech text by applying gift vocabulary corrections
  */
 export function correctSpokenProduct(rawText: string): string {
   if (!rawText || !rawText.trim()) return '';
 
-  let text = rawText.trim().toLowerCase();
+  // 0. Remove mobile speech duplicate words and stutter artifacts
+  const deduplicated = cleanSpokenDuplicates(rawText);
+  let text = deduplicated.trim().toLowerCase();
 
   // 1. Multi-word phrase substitutions
   const multiWordReplacements: Array<[RegExp, string]> = [

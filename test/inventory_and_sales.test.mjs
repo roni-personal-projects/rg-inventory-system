@@ -22,6 +22,9 @@ import {
   getSaleById,
   reverseSale,
   archiveProduct,
+  deleteProduct,
+  updateSale,
+  deleteSale,
   getStockMovements,
 } from '../src/lib/db.ts';
 
@@ -470,7 +473,13 @@ test('7. Speed Test: Routine Product Entry Benchmark (20 Products)', async (t) =
 });
 
 test('8. Speech Post-Processor & Gift Shop Dictionary Correction', async (t) => {
-  const { correctSpokenProduct, pickBestAlternative, getGiftSuggestions } = await import('../src/lib/speechCorrection.ts');
+  const {
+    correctSpokenProduct,
+    pickBestAlternative,
+    getGiftSuggestions,
+    cleanSpokenDuplicates,
+    assembleTranscript,
+  } = await import('../src/lib/speechCorrection.ts');
 
   await t.test('corrects phonetic misrecognitions of Indian gift terms', () => {
     assert.equal(correctSpokenProduct('garnish idol 6 inches'), 'Ganesh Idol 6 inch');
@@ -480,6 +489,29 @@ test('8. Speech Post-Processor & Gift Shop Dictionary Correction', async (t) => 
     assert.equal(correctSpokenProduct('photoframe eight inches'), 'Photo Frame 8 inch');
     assert.equal(correctSpokenProduct('wallclock'), 'Wall Clock');
     assert.equal(correctSpokenProduct('silver plated coin'), 'Silver Plated Coin');
+  });
+
+  await t.test('cleans mobile speech recognition duplicate words, stutters, and bigrams', () => {
+    // User reported exact mobile bug transcript:
+    const userReport = 'brass brass bras brass brass ganes ganesh ganesh idol';
+    assert.equal(cleanSpokenDuplicates(userReport), 'brass ganesh idol');
+    assert.equal(correctSpokenProduct(userReport), 'Brass Ganesh Idol');
+
+    // Repeated bigrams and multi-word repetitions
+    assert.equal(
+      cleanSpokenDuplicates('antique wooden wall clock antique wooden wall clock 1200 rupees'),
+      'antique wooden wall clock 1200 rupees'
+    );
+  });
+
+  await t.test('assembles mobile cumulative snapshots and desktop incremental chunks', () => {
+    // Mobile cumulative snapshots
+    const mobileChunks = ['brass', 'brass ganesh', 'brass ganesh idol 850 rupees'];
+    assert.equal(assembleTranscript(mobileChunks), 'brass ganesh idol 850 rupees');
+
+    // Desktop incremental chunks
+    const desktopChunks = ['brass ', 'ganesh ', 'idol 850 rupees'];
+    assert.equal(assembleTranscript(desktopChunks), 'brass ganesh idol 850 rupees');
   });
 
   await t.test('picks best alternative from speech recognition choices', () => {
@@ -569,6 +601,99 @@ test('9. Batch Voice Product Entry & Persistence', async (t) => {
     const res3 = parseSpokenInput('Lotus Diya 10 pcs');
     assert.equal(res3.name, 'Lotus Diya');
     assert.equal(res3.stock, '10');
+  });
+});
+
+test('10. Product Deletion & Sale Editing', async (t) => {
+  await t.test('deleteProduct removes product while preserving historical sale receipt', async () => {
+    const prod = await createProduct({
+      name: 'Item to be Deleted Soon',
+      selling_price: 35000,
+      current_stock: 5,
+    });
+
+    const saleResult = await checkoutSale({
+      idempotency_key: 'del-test-' + Date.now(),
+      items: [{ product_id: prod.id, quantity: 2 }],
+    });
+
+    assert.ok(saleResult.sale_id);
+
+    // Delete the product permanently
+    const delRes = await deleteProduct(prod.id);
+    assert.equal(delRes, true);
+
+    // Product should no longer exist in getProductById
+    const fetched = await getProductById(prod.id);
+    assert.equal(fetched, null);
+
+    // The sale receipt must still exist with the frozen snapshot name and unit price
+    const historicalSale = await getSaleById(saleResult.sale_id);
+    assert.ok(historicalSale);
+    assert.equal(historicalSale.items?.length, 1);
+    assert.equal(historicalSale.items?.[0].product_name_snapshot, 'Item to be Deleted Soon');
+    assert.equal(historicalSale.items?.[0].unit_price, 35000);
+  });
+
+  await t.test('updateSale adjusts quantity, restores/deducts stock, and updates total amount', async () => {
+    const prodA = await createProduct({
+      name: 'Cup Set for Sale Edit',
+      selling_price: 20000,
+      current_stock: 10,
+    });
+
+    const saleResult = await checkoutSale({
+      idempotency_key: 'edit-test-' + Date.now(),
+      items: [{ product_id: prodA.id, quantity: 3 }],
+    });
+
+    // Stock should be 10 - 3 = 7
+    let p = await getProductById(prodA.id);
+    assert.equal(p?.current_stock, 7);
+
+    // Now edit the sale: change quantity from 3 to 1 (customer returned 2 items at counter)
+    const updated = await updateSale(saleResult.sale_id, {
+      notes: 'Customer changed mind to only 1 piece',
+      items: [
+        { product_id: prodA.id, quantity: 1, unit_price: 20000 },
+      ],
+    });
+
+    assert.equal(updated.total_amount, 20000); // 1 * 20000
+    assert.equal(updated.notes, 'Customer changed mind to only 1 piece');
+
+    // Stock should have 2 restored: 7 + 2 = 9
+    p = await getProductById(prodA.id);
+    assert.equal(p?.current_stock, 9);
+  });
+
+  await t.test('deleteSale restores inventory stock and deletes sale record', async () => {
+    const prodB = await createProduct({
+      name: 'Item to Test Delete Sale',
+      selling_price: 15000,
+      current_stock: 5,
+    });
+
+    const saleResult = await checkoutSale({
+      idempotency_key: 'del-sale-test-' + Date.now(),
+      items: [{ product_id: prodB.id, quantity: 2 }],
+    });
+
+    // Stock was 5 - 2 = 3
+    let p = await getProductById(prodB.id);
+    assert.equal(p?.current_stock, 3);
+
+    // Delete the sale
+    const delRes = await deleteSale(saleResult.sale_id);
+    assert.equal(delRes, true);
+
+    // Stock must be restored: 3 + 2 = 5
+    p = await getProductById(prodB.id);
+    assert.equal(p?.current_stock, 5);
+
+    // Sale should no longer exist
+    const fetchedSale = await getSaleById(saleResult.sale_id);
+    assert.equal(fetchedSale, null);
   });
 });
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Product, Sale, SaleItem, StockMovement, MovementType, CheckoutResult } from '@/types';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { isNeonConfigured, sql } from './neon';
 
 // Local in-memory repository store for standalone development / testing when Supabase credentials are not yet supplied
 export interface MockStore {
@@ -274,6 +275,47 @@ export async function getProducts(options?: {
   stockFilter?: 'all' | 'low' | 'out';
   includeArchived?: boolean;
 }): Promise<Product[]> {
+  if (isNeonConfigured && sql) {
+    const whereParts: string[] = [];
+    const params: (string | number | boolean)[] = [];
+    let pIdx = 1;
+
+    if (!options?.includeArchived) {
+      whereParts.push(`is_active = true`);
+    }
+
+    if (options?.category && options.category !== 'All') {
+      whereParts.push(`category = $${pIdx++}`);
+      params.push(options.category);
+    }
+
+    if (options?.search) {
+      const term = `%${options.search.trim()}%`;
+      whereParts.push(`(name ILIKE $${pIdx} OR sku ILIKE $${pIdx} OR barcode ILIKE $${pIdx})`);
+      params.push(term);
+      pIdx++;
+    }
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const query = `SELECT * FROM products ${whereClause} ORDER BY created_at DESC`;
+    const rows = (await (sql as any).query(query, params)) as any[];
+
+    let results: Product[] = rows.map(r => ({
+      ...r,
+      selling_price: Number(r.selling_price),
+      current_stock: Number(r.current_stock),
+      low_stock_threshold: Number(r.low_stock_threshold),
+    }));
+
+    if (options?.stockFilter === 'low') {
+      results = results.filter(p => p.current_stock > 0 && p.current_stock <= p.low_stock_threshold);
+    } else if (options?.stockFilter === 'out') {
+      results = results.filter(p => p.current_stock === 0);
+    }
+
+    return results;
+  }
+
   if (isSupabaseConfigured && supabase) {
     let query = supabase.from('products').select('*');
 
@@ -337,6 +379,18 @@ export async function getProducts(options?: {
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
+  if (isNeonConfigured && sql) {
+    const rows = (await sql`SELECT * FROM products WHERE id = ${id} LIMIT 1`) as any[];
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      ...r,
+      selling_price: Number(r.selling_price),
+      current_stock: Number(r.current_stock),
+      low_stock_threshold: Number(r.low_stock_threshold),
+    } as Product;
+  }
+
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
     if (error) return null;
@@ -377,6 +431,37 @@ export async function createProduct(input: {
     ? input.low_stock_threshold 
     : 5;
   const barcode = input.barcode ? input.barcode.trim() : null;
+
+  if (isNeonConfigured && sql) {
+    if (barcode) {
+      const existing = (await sql`SELECT id FROM products WHERE barcode = ${barcode} LIMIT 1`) as any[];
+      if (existing.length > 0) {
+        throw new Error(`A product with barcode "${barcode}" already exists.`);
+      }
+    }
+
+    const rows = (await sql`
+      INSERT INTO products (name, category, selling_price, current_stock, low_stock_threshold, barcode, image_url, is_active)
+      VALUES (${trimmedName}, ${category}, ${input.selling_price}, ${input.current_stock}, ${lowStock}, ${barcode}, ${input.image_url || null}, true)
+      RETURNING *
+    `) as any[];
+
+    const newProd = {
+      ...rows[0],
+      selling_price: Number(rows[0].selling_price),
+      current_stock: Number(rows[0].current_stock),
+      low_stock_threshold: Number(rows[0].low_stock_threshold),
+    } as Product;
+
+    if (input.current_stock > 0) {
+      await sql`
+        INSERT INTO stock_movements (product_id, quantity_change, previous_quantity, resulting_quantity, movement_type, notes)
+        VALUES (${newProd.id}, ${input.current_stock}, 0, ${input.current_stock}, 'initial', 'Initial inventory stock on creation')
+      `;
+    }
+
+    return newProd;
+  }
 
   if (isSupabaseConfigured && supabase) {
     // Check barcode uniqueness if provided
@@ -491,6 +576,38 @@ export async function updateProduct(
     throw new Error('Low stock threshold cannot be negative');
   }
 
+  if (isNeonConfigured && sql) {
+    const existing = await getProductById(id);
+    if (!existing) throw new Error('Product not found');
+
+    const name = input.name !== undefined ? input.name.trim() : existing.name;
+    const category = input.category !== undefined ? input.category : existing.category;
+    const selling_price = input.selling_price !== undefined ? input.selling_price : existing.selling_price;
+    const low_stock_threshold = input.low_stock_threshold !== undefined ? input.low_stock_threshold : existing.low_stock_threshold;
+    const barcode = input.barcode !== undefined ? (input.barcode ? input.barcode.trim() : null) : existing.barcode;
+    const image_url = input.image_url !== undefined ? input.image_url : existing.image_url;
+
+    const rows = (await sql`
+      UPDATE products
+      SET name = ${name},
+          category = ${category},
+          selling_price = ${selling_price},
+          low_stock_threshold = ${low_stock_threshold},
+          barcode = ${barcode},
+          image_url = ${image_url},
+          updated_at = now()
+      WHERE id = ${id}
+      RETURNING *
+    `) as any[];
+
+    return {
+      ...rows[0],
+      selling_price: Number(rows[0].selling_price),
+      current_stock: Number(rows[0].current_stock),
+      low_stock_threshold: Number(rows[0].low_stock_threshold),
+    } as Product;
+  }
+
   if (isSupabaseConfigured && supabase) {
     const updateData: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -536,6 +653,11 @@ export async function updateProduct(
 }
 
 export async function archiveProduct(id: string): Promise<boolean> {
+  if (isNeonConfigured && sql) {
+    await sql`UPDATE products SET is_active = false, updated_at = now() WHERE id = ${id}`;
+    return true;
+  }
+
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.from('products').update({ is_active: false }).eq('id', id);
     if (error) throw new Error(error.message);
@@ -551,6 +673,38 @@ export async function archiveProduct(id: string): Promise<boolean> {
   });
 }
 
+export async function deleteProduct(id: string): Promise<boolean> {
+  if (isNeonConfigured && sql) {
+    // Delete product (FK constraints CASCADE stock_movements and SET NULL on sale_items)
+    await sql`DELETE FROM products WHERE id = ${id}::uuid`;
+    return true;
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    await supabase.from('stock_movements').delete().eq('product_id', id);
+    await supabase.from('sale_items').update({ product_id: null }).eq('product_id', id);
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  return withLock(async () => {
+    const index = globalStore.products.findIndex(p => p.id === id);
+    if (index === -1) throw new Error('Product not found');
+    globalStore.products.splice(index, 1);
+    if (globalStore.movements) {
+      globalStore.movements = globalStore.movements.filter(m => m.product_id !== id);
+    }
+    for (const item of (globalStore.saleItems || [])) {
+      if (item.product_id === id) {
+        (item as any).product_id = null;
+      }
+    }
+    saveStore();
+    return true;
+  });
+}
+
 // ==================== STOCK MANAGEMENT ====================
 
 export async function adjustStock(params: {
@@ -562,6 +716,34 @@ export async function adjustStock(params: {
 }): Promise<{ product: Product; movement: StockMovement }> {
   if (params.quantity_change === 0) {
     throw new Error('Quantity change must not be zero');
+  }
+
+  if (isNeonConfigured && sql) {
+    const res = (await sql`
+      SELECT adjust_product_stock(
+        ${params.product_id}::uuid,
+        ${params.quantity_change}::int,
+        ${params.movement_type}::text,
+        ${params.notes || null}::text,
+        ${params.user_id || null}::uuid
+      ) as result
+    `) as any[];
+
+    const data = res[0]?.result;
+    if (!data?.success) throw new Error(data?.message || 'Stock adjustment failed');
+
+    const product = await getProductById(params.product_id);
+    if (!product) throw new Error('Product updated but not found');
+
+    const movRows = (await sql`
+      SELECT sm.*, json_build_object('name', p.name, 'sku', p.sku) as product
+      FROM stock_movements sm
+      JOIN products p ON sm.product_id = p.id
+      WHERE sm.id = ${data.movement_id}::uuid
+      LIMIT 1
+    `) as any[];
+
+    return { product, movement: movRows[0] as StockMovement };
   }
 
   if (isSupabaseConfigured && supabase) {
@@ -636,6 +818,34 @@ export async function getStockMovements(options?: {
 }): Promise<StockMovement[]> {
   const limit = options?.limit || 50;
 
+  if (isNeonConfigured && sql) {
+    const whereParts: string[] = [];
+    const params: (string | number)[] = [];
+    let pIdx = 1;
+
+    if (options?.product_id) {
+      whereParts.push(`sm.product_id = $${pIdx++}`);
+      params.push(options.product_id);
+    }
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const query = `
+      SELECT sm.*, json_build_object('name', p.name, 'sku', p.sku) as product
+      FROM stock_movements sm
+      JOIN products p ON sm.product_id = p.id
+      ${whereClause}
+      ORDER BY sm.created_at DESC
+      LIMIT ${limit}
+    `;
+    const rows = (await (sql as any).query(query, params)) as any[];
+    return rows.map(r => ({
+      ...r,
+      quantity_change: Number(r.quantity_change),
+      previous_quantity: Number(r.previous_quantity),
+      resulting_quantity: Number(r.resulting_quantity),
+    })) as StockMovement[];
+  }
+
   if (isSupabaseConfigured && supabase) {
     let query = supabase
       .from('stock_movements')
@@ -685,6 +895,29 @@ export async function checkoutSale(params: {
     if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
       throw new Error('Item quantity must be a positive integer');
     }
+  }
+
+  if (isNeonConfigured && sql) {
+    const res = (await sql`
+      SELECT create_sale_transaction(
+        ${params.idempotency_key}::text,
+        ${JSON.stringify(params.items)}::jsonb,
+        ${params.notes || null}::text,
+        ${params.user_id || null}::uuid
+      ) as result
+    `) as any[];
+
+    const data = res[0]?.result;
+    if (!data?.success) {
+      throw new Error(data?.message || 'Checkout failed');
+    }
+
+    return {
+      success: true,
+      idempotent_replay: Boolean(data.idempotent_replay),
+      sale_id: data.sale_id,
+      total_amount: Number(data.total_amount),
+    };
   }
 
   if (isSupabaseConfigured && supabase) {
@@ -822,6 +1055,55 @@ export async function getSales(options?: {
 }): Promise<Sale[]> {
   const limit = options?.limit || 100;
 
+  if (isNeonConfigured && sql) {
+    const whereParts: string[] = [];
+    const params: (string | number)[] = [];
+    let pIdx = 1;
+
+    if (options?.startDate) {
+      whereParts.push(`s.created_at >= $${pIdx++}`);
+      params.push(options.startDate);
+    }
+    if (options?.endDate) {
+      whereParts.push(`s.created_at <= $${pIdx++}`);
+      params.push(options.endDate);
+    }
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const query = `
+      SELECT s.*,
+        COALESCE(json_agg(json_build_object(
+          'id', si.id,
+          'sale_id', si.sale_id,
+          'product_id', si.product_id,
+          'product_name_snapshot', si.product_name_snapshot,
+          'product_sku_snapshot', si.product_sku_snapshot,
+          'quantity', si.quantity,
+          'unit_price', si.unit_price,
+          'line_total', si.line_total,
+          'created_at', si.created_at
+        )) FILTER (WHERE si.id IS NOT NULL), '[]'::json) as items
+      FROM sales s
+      LEFT JOIN sale_items si ON s.id = si.sale_id
+      ${whereClause}
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+      LIMIT ${limit}
+    `;
+
+    const rows = (await (sql as any).query(query, params)) as any[];
+    return rows.map(r => ({
+      ...r,
+      total_amount: Number(r.total_amount),
+      items: (r.items || []).map((i: any) => ({
+        ...i,
+        quantity: Number(i.quantity),
+        unit_price: Number(i.unit_price),
+        line_total: Number(i.line_total),
+      })),
+    })) as Sale[];
+  }
+
   if (isSupabaseConfigured && supabase) {
     let query = supabase
       .from('sales')
@@ -864,6 +1146,41 @@ export async function getSales(options?: {
 }
 
 export async function getSaleById(id: string): Promise<Sale | null> {
+  if (isNeonConfigured && sql) {
+    const rows = (await sql`
+      SELECT s.*,
+        COALESCE(json_agg(json_build_object(
+          'id', si.id,
+          'sale_id', si.sale_id,
+          'product_id', si.product_id,
+          'product_name_snapshot', si.product_name_snapshot,
+          'product_sku_snapshot', si.product_sku_snapshot,
+          'quantity', si.quantity,
+          'unit_price', si.unit_price,
+          'line_total', si.line_total,
+          'created_at', si.created_at
+        )) FILTER (WHERE si.id IS NOT NULL), '[]'::json) as items
+      FROM sales s
+      LEFT JOIN sale_items si ON s.id = si.sale_id
+      WHERE s.id = ${id}::uuid
+      GROUP BY s.id
+      LIMIT 1
+    `) as any[];
+
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      ...r,
+      total_amount: Number(r.total_amount),
+      items: (r.items || []).map((i: any) => ({
+        ...i,
+        quantity: Number(i.quantity),
+        unit_price: Number(i.unit_price),
+        line_total: Number(i.line_total),
+      })),
+    } as Sale;
+  }
+
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('sales')
@@ -884,6 +1201,20 @@ export async function getSaleById(id: string): Promise<Sale | null> {
 }
 
 export async function reverseSale(saleId: string, reason?: string): Promise<boolean> {
+  if (isNeonConfigured && sql) {
+    const res = (await sql`
+      SELECT reverse_sale_transaction(
+        ${saleId}::uuid,
+        ${reason || 'Sale cancelled / returned'}::text,
+        NULL::uuid
+      ) as result
+    `) as any[];
+
+    const data = res[0]?.result;
+    if (!data?.success) throw new Error(data?.message || 'Sale reversal failed');
+    return true;
+  }
+
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.rpc('reverse_sale_transaction', {
       p_sale_id: saleId,
@@ -932,6 +1263,284 @@ export async function reverseSale(saleId: string, reason?: string): Promise<bool
     }
 
     return true;
+  });
+}
+
+export async function deleteSale(saleId: string): Promise<boolean> {
+  const existing = await getSaleById(saleId);
+  if (!existing) {
+    throw new Error('Sale not found');
+  }
+
+  if (isNeonConfigured && sql) {
+    // 1. Restore inventory for products in the sale
+    for (const item of existing.items || []) {
+      if (item.product_id) {
+        await sql`
+          UPDATE products
+          SET current_stock = current_stock + ${item.quantity}, updated_at = now()
+          WHERE id = ${item.product_id}::uuid
+        `;
+        await sql`
+          INSERT INTO stock_movements (
+            product_id, quantity_change, previous_quantity, resulting_quantity, movement_type, notes
+          )
+          SELECT
+            p.id,
+            ${item.quantity},
+            p.current_stock - ${item.quantity},
+            p.current_stock,
+            'correction',
+            ${'Sale deleted (restored to inventory)'}
+          FROM products p WHERE p.id = ${item.product_id}::uuid
+        `;
+      }
+    }
+
+    // 2. Delete sale items and sale record
+    await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}::uuid`;
+    await sql`DELETE FROM sales WHERE id = ${saleId}::uuid`;
+    return true;
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    for (const item of existing.items || []) {
+      if (item.product_id) {
+        const { data: p } = await supabase.from('products').select('current_stock').eq('id', item.product_id).single();
+        if (p) {
+          await supabase.from('products').update({ current_stock: p.current_stock + item.quantity }).eq('id', item.product_id);
+        }
+      }
+    }
+    await supabase.from('sale_items').delete().eq('sale_id', saleId);
+    const { error } = await supabase.from('sales').delete().eq('id', saleId);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  return withLock(async () => {
+    const saleIndex = globalStore.sales.findIndex(s => s.id === saleId);
+    if (saleIndex === -1) throw new Error('Sale not found');
+
+    const items = globalStore.saleItems.filter(i => i.sale_id === saleId);
+    const now = new Date().toISOString();
+
+    for (const item of items) {
+      if (item.product_id) {
+        const product = globalStore.products.find(p => p.id === item.product_id);
+        if (product) {
+          const prev = product.current_stock;
+          const resulting = prev + item.quantity;
+          product.current_stock = resulting;
+          product.updated_at = now;
+
+          if (globalStore.movements) {
+            globalStore.movements.unshift({
+              id: 'mov-' + Math.random().toString(36).substring(2, 9),
+              product_id: product.id,
+              quantity_change: item.quantity,
+              previous_quantity: prev,
+              resulting_quantity: resulting,
+              movement_type: 'correction',
+              notes: 'Sale deleted (restored to inventory)',
+              created_at: now,
+              product: {
+                name: product.name,
+                sku: product.sku,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    globalStore.sales.splice(saleIndex, 1);
+    globalStore.saleItems = globalStore.saleItems.filter(i => i.sale_id !== saleId);
+    saveStore();
+    return true;
+  });
+}
+
+export async function updateSale(
+  saleId: string,
+  params: {
+    notes?: string | null;
+    items?: Array<{
+      product_id: string;
+      quantity: number;
+      unit_price: number;
+    }>;
+  }
+): Promise<Sale> {
+  const existingSale = await getSaleById(saleId);
+  if (!existingSale) {
+    throw new Error('Sale not found');
+  }
+
+  if (isNeonConfigured && sql) {
+    let newTotal = existingSale.total_amount;
+    const notesToSave = params.notes !== undefined ? params.notes : existingSale.notes;
+
+    if (params.items && Array.isArray(params.items)) {
+      // Map existing item quantities
+      const existingQtyMap = new Map<string, number>();
+      for (const item of existingSale.items || []) {
+        if (item.product_id) {
+          existingQtyMap.set(item.product_id, (existingQtyMap.get(item.product_id) || 0) + item.quantity);
+        }
+      }
+
+      // Map new item quantities
+      const newQtyMap = new Map<string, number>();
+      for (const item of params.items) {
+        if (item.product_id) {
+          newQtyMap.set(item.product_id, (newQtyMap.get(item.product_id) || 0) + item.quantity);
+        }
+      }
+
+      // Collect all affected product IDs
+      const allProductIds = new Set([...existingQtyMap.keys(), ...newQtyMap.keys()]);
+
+      // Verify stock availability for items needing increases
+      for (const prodId of allProductIds) {
+        const oldQty = existingQtyMap.get(prodId) || 0;
+        const newQty = newQtyMap.get(prodId) || 0;
+        const diff = newQty - oldQty; // positive: need more stock, negative: returning stock
+
+        if (diff > 0) {
+          const prodRows = (await sql`SELECT id, name, current_stock FROM products WHERE id = ${prodId}::uuid`) as any[];
+          if (prodRows.length === 0) throw new Error(`Product not found: ${prodId}`);
+          if (prodRows[0].current_stock < diff) {
+            throw new Error(`Insufficient stock for "${prodRows[0].name}". Needs ${diff} more, only ${prodRows[0].current_stock} available.`);
+          }
+        }
+      }
+
+      // Apply stock differences
+      for (const prodId of allProductIds) {
+        const oldQty = existingQtyMap.get(prodId) || 0;
+        const newQty = newQtyMap.get(prodId) || 0;
+        const diff = newQty - oldQty;
+
+        if (diff !== 0) {
+          await sql`
+            UPDATE products 
+            SET current_stock = current_stock - ${diff}, updated_at = now() 
+            WHERE id = ${prodId}::uuid
+          `;
+          await sql`
+            INSERT INTO stock_movements (
+              product_id, quantity_change, previous_quantity, resulting_quantity, movement_type, related_sale_id, notes
+            )
+            SELECT 
+              p.id, 
+              ${-diff}, 
+              p.current_stock + ${diff}, 
+              p.current_stock, 
+              'correction', 
+              ${saleId}::uuid, 
+              ${`Sale edited: ${diff > 0 ? `+${diff} sold` : `${-diff} returned`}`}
+            FROM products p WHERE p.id = ${prodId}::uuid
+          `;
+        }
+      }
+
+      // Delete old sale_items and insert new sale_items
+      await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}::uuid`;
+
+      newTotal = 0;
+      for (const item of params.items) {
+        const prodRows = (await sql`SELECT name, sku FROM products WHERE id = ${item.product_id}::uuid`) as any[];
+        const nameSnapshot = prodRows[0]?.name || 'Product';
+        const skuSnapshot = prodRows[0]?.sku || 'SKU';
+        const lineTotal = item.quantity * item.unit_price;
+        newTotal += lineTotal;
+
+        await sql`
+          INSERT INTO sale_items (
+            sale_id, product_id, product_name_snapshot, product_sku_snapshot, quantity, unit_price, line_total
+          ) VALUES (
+            ${saleId}::uuid, ${item.product_id}::uuid, ${nameSnapshot}, ${skuSnapshot}, ${item.quantity}, ${item.unit_price}, ${lineTotal}
+          )
+        `;
+      }
+    }
+
+    await sql`
+      UPDATE sales 
+      SET total_amount = ${newTotal}, notes = ${notesToSave} 
+      WHERE id = ${saleId}::uuid
+    `;
+
+    const updated = await getSaleById(saleId);
+    return updated!;
+  }
+
+  // In-memory fallback
+  return withLock(async () => {
+    const sale = globalStore.sales.find(s => s.id === saleId);
+    if (!sale) throw new Error('Sale not found');
+
+    if (params.notes !== undefined) {
+      sale.notes = params.notes;
+    }
+
+    if (params.items && Array.isArray(params.items)) {
+      const existingItems = globalStore.saleItems.filter(i => i.sale_id === saleId);
+      const existingQtyMap = new Map<string, number>();
+      for (const item of existingItems) {
+        if (item.product_id) {
+          existingQtyMap.set(item.product_id, (existingQtyMap.get(item.product_id) || 0) + item.quantity);
+        }
+      }
+
+      const newQtyMap = new Map<string, number>();
+      for (const item of params.items) {
+        if (item.product_id) {
+          newQtyMap.set(item.product_id, (newQtyMap.get(item.product_id) || 0) + item.quantity);
+        }
+      }
+
+      const allProductIds = new Set([...existingQtyMap.keys(), ...newQtyMap.keys()]);
+
+      for (const prodId of allProductIds) {
+        const oldQty = existingQtyMap.get(prodId) || 0;
+        const newQty = newQtyMap.get(prodId) || 0;
+        const diff = newQty - oldQty;
+
+        const prod = globalStore.products.find(p => p.id === prodId);
+        if (!prod) throw new Error(`Product not found: ${prodId}`);
+        if (diff > 0 && prod.current_stock < diff) {
+          throw new Error(`Insufficient stock for "${prod.name}". Needs ${diff} more, only ${prod.current_stock} available.`);
+        }
+        prod.current_stock -= diff;
+      }
+
+      // Remove old sale items
+      globalStore.saleItems = globalStore.saleItems.filter(i => i.sale_id !== saleId);
+
+      let newTotal = 0;
+      for (const item of params.items) {
+        const prod = globalStore.products.find(p => p.id === item.product_id);
+        const lineTotal = item.quantity * item.unit_price;
+        newTotal += lineTotal;
+        globalStore.saleItems.push({
+          id: 'si-' + Math.random().toString(36).substring(2, 9),
+          sale_id: saleId,
+          product_id: item.product_id,
+          product_name_snapshot: prod?.name || 'Product',
+          product_sku_snapshot: prod?.sku || 'SKU',
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          line_total: lineTotal,
+          created_at: new Date().toISOString(),
+        });
+      }
+      sale.total_amount = newTotal;
+    }
+
+    const items = globalStore.saleItems.filter(i => i.sale_id === saleId);
+    return { ...sale, items };
   });
 }
 

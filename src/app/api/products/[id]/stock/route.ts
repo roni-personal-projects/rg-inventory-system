@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adjustStock } from '@/lib/db';
+import { invalidateCache } from '@/lib/apiCache';
 import { MovementType } from '@/types';
 
 export async function POST(
@@ -30,6 +31,10 @@ export async function POST(
       movement_type,
       notes: body.notes,
     });
+
+    invalidateCache('products');
+    invalidateCache('stock');
+    invalidateCache('dashboard');
 
     return NextResponse.json(result);
   } catch (err: unknown) {

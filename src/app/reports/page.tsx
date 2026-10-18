@@ -84,12 +84,12 @@ export default function ReportsPage() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Reports &amp; Stock Audit</h2>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Reports &amp; Stock Audit</h2>
           <p className="text-xs text-slate-500 font-medium">Accurate business sales and stock history</p>
         </div>
 
         {/* Date Filter Tabs */}
-        <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 self-start sm:self-auto shadow-xs">
+        <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 self-stretch sm:self-auto shadow-xs overflow-x-auto scrollbar-none">
           {(
             [
               { id: 'today', label: 'Today' },
@@ -101,7 +101,7 @@ export default function ReportsPage() {
             <button
               key={tab.id}
               onClick={() => setDateRange(tab.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
                 dateRange === tab.id
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -113,67 +113,77 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Total Sales Recorded
-          </span>
-          <div className="text-2xl font-black text-slate-900 mt-1">
-            {formatRupees(periodTotalRevenue)}
+      {/* Summary KPI Cards (2x2 grid on mobile, 4-col on desktop) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+        <div className="p-3.5 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block">
+              Total Sales
+            </span>
+            <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1">
+              {formatRupees(periodTotalRevenue)}
+            </div>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1 font-medium">
-            Gross sales volume (not profit).
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1 font-medium">
+            Gross sales volume.
           </p>
         </div>
 
-        <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Transactions
-          </span>
-          <div className="text-2xl font-black text-slate-900 mt-1">
-            {periodTotalCount} sales
+        <div className="p-3.5 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block">
+              Transactions
+            </span>
+            <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1">
+              {periodTotalCount} sales
+            </div>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1 font-medium">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1 font-medium">
             Completed checkout receipts.
           </p>
         </div>
 
         <Link
           href="/products?stockFilter=low"
-          className="p-5 bg-amber-50/70 hover:bg-amber-50 rounded-2xl border border-amber-200 shadow-sm transition-all block group"
+          prefetch={true}
+          className="p-3.5 sm:p-5 bg-amber-50/70 hover:bg-amber-50 rounded-2xl border border-amber-200 shadow-sm flex flex-col justify-between group"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
-              Low Stock Items
-            </span>
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-bold text-amber-800 uppercase tracking-wider block">
+                Low Stock
+              </span>
+              <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
+            </div>
+            <div className="text-lg sm:text-2xl font-black text-amber-900 mt-1">
+              {lowStockProducts.length} items
+            </div>
           </div>
-          <div className="text-2xl font-black text-amber-900 mt-1">
-            {lowStockProducts.length} items
-          </div>
-          <span className="text-[11px] text-amber-700 font-semibold mt-1 inline-flex items-center gap-1">
-            <span>View low stock</span>
-            <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+          <span className="text-[10px] sm:text-[11px] text-amber-700 font-semibold mt-1 inline-flex items-center gap-1">
+            <span>View low</span>
+            <ArrowRight className="w-3 h-3" />
           </span>
         </Link>
 
         <Link
           href="/products?stockFilter=out"
-          className="p-5 bg-rose-50/70 hover:bg-rose-50 rounded-2xl border border-rose-200 shadow-sm transition-all block group"
+          prefetch={true}
+          className="p-3.5 sm:p-5 bg-rose-50/70 hover:bg-rose-50 rounded-2xl border border-rose-200 shadow-sm flex flex-col justify-between group"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
-              Out of Stock
-            </span>
-            <XCircle className="w-4 h-4 text-rose-600" />
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-bold text-rose-800 uppercase tracking-wider block">
+                Out of Stock
+              </span>
+              <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600" />
+            </div>
+            <div className="text-lg sm:text-2xl font-black text-rose-900 mt-1">
+              {outOfStockProducts.length} items
+            </div>
           </div>
-          <div className="text-2xl font-black text-rose-900 mt-1">
-            {outOfStockProducts.length} items
-          </div>
-          <span className="text-[11px] text-rose-700 font-semibold mt-1 inline-flex items-center gap-1">
-            <span>Restock required</span>
-            <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+          <span className="text-[10px] sm:text-[11px] text-rose-700 font-semibold mt-1 inline-flex items-center gap-1">
+            <span>Restock</span>
+            <ArrowRight className="w-3 h-3" />
           </span>
         </Link>
       </div>
@@ -194,7 +204,7 @@ export default function ReportsPage() {
           <a
             href="/api/export?type=products"
             download
-            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800 transition-colors"
+            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             <div>
@@ -206,7 +216,7 @@ export default function ReportsPage() {
           <a
             href="/api/export?type=sales"
             download
-            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800 transition-colors"
+            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800"
           >
             <FileSpreadsheet className="w-4 h-4 text-amber-600" />
             <div>
@@ -218,7 +228,7 @@ export default function ReportsPage() {
           <a
             href="/api/export?type=movements"
             download
-            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800 transition-colors"
+            className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2.5 text-xs font-bold text-slate-800"
           >
             <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
             <div>
@@ -267,7 +277,7 @@ export default function ReportsPage() {
                       </span>
                     </div>
 
-                    <div className="text-slate-500 text-[11px] mt-0.5">
+                    <div className="text-slate-500 text-[11px] mt-0.5" suppressHydrationWarning>
                       {new Date(mov.created_at).toLocaleString([], {
                         dateStyle: 'short',
                         timeStyle: 'short',

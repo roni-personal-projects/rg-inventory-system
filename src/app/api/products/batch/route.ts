@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createProduct } from '@/lib/db';
+import { invalidateCache } from '@/lib/apiCache';
 
 interface BatchItemInput {
   name: string;
@@ -59,6 +60,11 @@ export async function POST(request: NextRequest) {
           error: err instanceof Error ? err.message : 'Failed to save',
         });
       }
+    }
+
+    if (saved.length > 0) {
+      invalidateCache('products');
+      invalidateCache('dashboard');
     }
 
     return NextResponse.json({

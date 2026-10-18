@@ -1,10 +1,160 @@
-import fs from 'node:fs';
+import fs from 'fs';
+import path from 'path';
+import sharp from 'sharp';
 
-// Minimal 1x1 valid PNG buffer
-const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const buf = Buffer.from(pngBase64, 'base64');
+// High-resolution vector SVG for Ruchi Gift Collection
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b45309" />
+      <stop offset="50%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
 
-fs.writeFileSync('public/icon-192.png', buf);
-fs.writeFileSync('public/icon-512.png', buf);
-fs.writeFileSync('public/favicon.ico', buf);
-console.log('Icons created.');
+    <!-- Gift Box Body Gradient -->
+    <linearGradient id="boxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#be123c" />
+      <stop offset="100%" stop-color="#881337" />
+    </linearGradient>
+
+    <!-- Gift Box Lid Gradient -->
+    <linearGradient id="lidGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="100%" stop-color="#9f1239" />
+    </linearGradient>
+
+    <!-- Gold Ribbon Gradient -->
+    <linearGradient id="goldRibbon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="30%" stop-color="#fde047" />
+      <stop offset="70%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+
+    <!-- Gold Bow Gradient -->
+    <linearGradient id="bowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb" />
+      <stop offset="50%" stop-color="#fde047" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="boxShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+
+    <filter id="bowShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- App Icon Background Squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="#fef08a" stroke-width="4" stroke-opacity="0.6" />
+
+  <!-- Inner Ambient Glow Ring -->
+  <circle cx="256" cy="240" r="190" fill="#fef3c7" opacity="0.12" />
+
+  <!-- Sparkles -->
+  <!-- Top Left Sparkle -->
+  <path d="M 100 130 Q 100 155 75 155 Q 100 155 100 180 Q 100 155 125 155 Q 100 155 100 130 Z" fill="#ffffff" opacity="0.9" />
+  <!-- Top Right Sparkle -->
+  <path d="M 400 110 Q 400 130 380 130 Q 400 130 400 150 Q 400 130 420 130 Q 400 130 400 110 Z" fill="#fef08a" opacity="0.95" />
+  <!-- Right Lower Sparkle -->
+  <path d="M 425 290 Q 425 305 410 305 Q 425 305 425 320 Q 425 305 440 305 Q 425 305 425 290 Z" fill="#ffffff" opacity="0.8" />
+  <!-- Small Star Left -->
+  <circle cx="85" cy="280" r="6" fill="#fef08a" opacity="0.8" />
+  <circle cx="430" cy="200" r="5" fill="#ffffff" opacity="0.75" />
+
+  <!-- Main Gift Box Group -->
+  <g filter="url(#boxShadow)">
+    <!-- Box Base -->
+    <rect x="131" y="240" width="250" height="185" rx="20" fill="url(#boxGrad)" />
+
+    <!-- Vertical Ribbon on Box Base -->
+    <rect x="231" y="240" width="50" height="185" fill="url(#goldRibbon)" />
+    <!-- Vertical Ribbon Highlight Line -->
+    <line x1="246" y1="240" x2="246" y2="425" stroke="#ffffff" stroke-width="3" stroke-opacity="0.5" />
+
+    <!-- Box Lid -->
+    <rect x="116" y="200" width="280" height="52" rx="14" fill="url(#lidGrad)" />
+    <!-- Lid Shadow on Box Base -->
+    <rect x="126" y="240" width="260" height="8" fill="#4c0519" opacity="0.4" />
+
+    <!-- Vertical Ribbon on Lid -->
+    <rect x="231" y="200" width="50" height="52" fill="url(#goldRibbon)" />
+    <line x1="246" y1="200" x2="246" y2="252" stroke="#ffffff" stroke-width="3" stroke-opacity="0.5" />
+
+    <!-- Horizontal Ribbon on Lid -->
+    <rect x="116" y="215" width="280" height="22" fill="url(#goldRibbon)" opacity="0.4" />
+  </g>
+
+  <!-- Big Decorative Bow on Top -->
+  <g filter="url(#bowShadow)">
+    <!-- Left Loop -->
+    <path d="M 256 200 C 200 130 110 135 150 195 C 175 225 230 205 256 200 Z" fill="url(#bowGrad)" />
+    <path d="M 245 195 C 205 155 145 155 165 190 C 180 210 225 198 245 195 Z" fill="#d97706" opacity="0.45" />
+
+    <!-- Right Loop -->
+    <path d="M 256 200 C 312 130 402 135 362 195 C 337 225 282 205 256 200 Z" fill="url(#bowGrad)" />
+    <path d="M 267 195 C 307 155 367 155 347 190 C 332 210 287 198 267 195 Z" fill="#d97706" opacity="0.45" />
+
+    <!-- Ribbon Tails -->
+    <path d="M 240 205 C 215 235 185 270 170 300 C 185 295 210 270 248 215 Z" fill="url(#goldRibbon)" opacity="0.9" />
+    <path d="M 272 205 C 297 235 327 270 342 300 C 327 295 302 270 264 215 Z" fill="url(#goldRibbon)" opacity="0.9" />
+
+    <!-- Center Bow Knot -->
+    <ellipse cx="256" cy="200" rx="22" ry="18" fill="url(#goldRibbon)" stroke="#fef08a" stroke-width="2" />
+    <circle cx="253" cy="197" r="5" fill="#ffffff" opacity="0.7" />
+  </g>
+</svg>`;
+
+async function generateIcons() {
+  const publicDir = path.resolve('public');
+  const appDir = path.resolve('src/app');
+
+  // Save SVG
+  const svgPath = path.join(publicDir, 'favicon.svg');
+  fs.writeFileSync(svgPath, svgContent);
+  console.log('Saved favicon.svg');
+
+  // Render 512x512
+  const icon512Path = path.join(publicDir, 'icon-512.png');
+  await sharp(Buffer.from(svgContent)).resize(512, 512).png().toFile(icon512Path);
+  console.log('Rendered icon-512.png (512x512)');
+
+  // Render 192x192
+  const icon192Path = path.join(publicDir, 'icon-192.png');
+  await sharp(Buffer.from(svgContent)).resize(192, 192).png().toFile(icon192Path);
+  console.log('Rendered icon-192.png (192x192)');
+
+  // Render apple-touch-icon (180x180)
+  const appleTouchPath = path.join(publicDir, 'apple-touch-icon.png');
+  await sharp(Buffer.from(svgContent)).resize(180, 180).png().toFile(appleTouchPath);
+  console.log('Rendered apple-touch-icon.png (180x180)');
+
+  // Render 32x32 favicon
+  const faviconPngPath = path.join(publicDir, 'favicon.png');
+  await sharp(Buffer.from(svgContent)).resize(32, 32).png().toFile(faviconPngPath);
+  console.log('Rendered favicon.png (32x32)');
+
+  // Render 48x48 as favicon.ico
+  const faviconIcoPath = path.join(publicDir, 'favicon.ico');
+  await sharp(Buffer.from(svgContent)).resize(48, 48).png().toFile(faviconIcoPath);
+  console.log('Rendered favicon.ico (48x48)');
+
+  // Also copy to src/app/ for Next.js App Router metadata conventions
+  const appFavicon = path.join(appDir, 'favicon.ico');
+  fs.copyFileSync(faviconIcoPath, appFavicon);
+
+  const appIcon = path.join(appDir, 'icon.png');
+  fs.copyFileSync(icon192Path, appIcon);
+
+  const appAppleIcon = path.join(appDir, 'apple-icon.png');
+  fs.copyFileSync(appleTouchPath, appAppleIcon);
+
+  console.log('Copied icon assets to src/app/');
+}
+
+generateIcons().catch(console.error);

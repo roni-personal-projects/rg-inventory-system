@@ -19,11 +19,14 @@ import {
   ClipboardList,
   Sparkle,
   Bug,
+  Timer,
+  CornerDownLeft,
 } from 'lucide-react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { rupeesToPaise } from '@/lib/money';
 import { correctSpokenProduct } from '@/lib/speechCorrection';
 import { PRODUCT_CATEGORIES } from '@/types';
+import { clientStore } from '@/lib/clientStore';
 
 interface BatchRow {
   id: string;
@@ -40,6 +43,7 @@ export default function BatchProductEntryPage() {
     { id: '1', name: '', category: 'Religious Idols', priceRupees: '', stock: '1' },
   ]);
 
+  const [pauseThresholdMs, setPauseThresholdMs] = useState<number>(1000);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [showVoiceDebug, setShowVoiceDebug] = useState(false);
@@ -167,6 +171,9 @@ export default function BatchProductEntryPage() {
     interimTranscript,
     startListening,
     stopListening,
+    forceCommitCurrentPhrase,
+    isPausing,
+    pauseProgress,
     error: voiceError,
     clearError,
     selectedLang,
@@ -175,6 +182,7 @@ export default function BatchProductEntryPage() {
   } = useVoiceInput({
     lang: 'en-IN',
     continuous: true,
+    pauseThresholdMs,
     onFinalPhrase: (finalPhrase) => {
       // Split phrase if user said "and", "aur", commas, or numbers
       const phrases = finalPhrase
@@ -282,6 +290,7 @@ export default function BatchProductEntryPage() {
       });
 
       if (data.savedCount > 0) {
+        clientStore.invalidate();
         setSavedItemsCount(data.savedCount);
         setShowSuccessModal(true);
         if (data.failedCount === 0) {
@@ -316,13 +325,21 @@ export default function BatchProductEntryPage() {
       <div className="p-4 bg-amber-500/10 border border-amber-300 rounded-2xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-extrabold text-amber-950">Continuous Voice Intake</h3>
+            <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
+              <span>Continuous Voice Intake</span>
+              {isListening && (
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full border border-rose-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                  Live Listening
+                </span>
+              )}
+            </h3>
             <p className="text-xs text-amber-900 mt-0.5">
-              Tap <strong>Start Voice Capture</strong> and speak product names. Pause between items or say <em>&quot;and&quot;</em> / <em>&quot;next&quot;</em>.
+              Speak product names naturally. A short pause automatically adds each item into the table below.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Language Selector */}
             <div className="flex items-center gap-1 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-xl border border-amber-200 shadow-xs">
               <Globe className="w-3.5 h-3.5 text-slate-400" />
@@ -337,13 +354,31 @@ export default function BatchProductEntryPage() {
               </select>
             </div>
 
+            {/* Next Item Button (Active during listening) */}
+            {isListening && (
+              <button
+                type="button"
+                onClick={forceCommitCurrentPhrase}
+                disabled={!interimTranscript.trim()}
+                title="Add current item immediately without waiting for pause"
+                className={`px-3 py-2 rounded-xl font-bold flex items-center gap-1 text-xs shadow-xs transition-all ${
+                  interimTranscript.trim()
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 active:scale-95'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                <CornerDownLeft className="w-3.5 h-3.5" />
+                <span>Next Item ↵</span>
+              </button>
+            )}
+
             {/* Mic Toggle Button */}
             <button
               type="button"
               onClick={isListening ? stopListening : startListening}
               className={`px-4 py-2.5 rounded-xl font-extrabold flex items-center justify-center gap-2 text-xs sm:text-sm shadow-sm transition-all whitespace-nowrap ${
                 isListening
-                  ? 'bg-rose-600 text-white animate-pulse'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
                   : 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95'
               }`}
             >
@@ -359,6 +394,55 @@ export default function BatchProductEntryPage() {
                 </>
               )}
             </button>
+          </div>
+        </div>
+
+        {/* Pause Sensitivity & Auto-Commit Settings */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-amber-200/60 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+              <Timer className="w-3.5 h-3.5 text-amber-700" />
+              <span>Pause Sensitivity:</span>
+            </span>
+            <div className="inline-flex rounded-lg bg-amber-200/50 p-0.5 border border-amber-300">
+              <button
+                type="button"
+                onClick={() => setPauseThresholdMs(700)}
+                className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all ${
+                  pauseThresholdMs === 700
+                    ? 'bg-white text-amber-950 shadow-xs'
+                    : 'text-amber-800 hover:text-amber-950'
+                }`}
+              >
+                ⚡ Fast (0.7s)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPauseThresholdMs(1000)}
+                className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all ${
+                  pauseThresholdMs === 1000
+                    ? 'bg-white text-amber-950 shadow-xs'
+                    : 'text-amber-800 hover:text-amber-950'
+                }`}
+              >
+                ● Normal (1.0s)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPauseThresholdMs(1400)}
+                className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all ${
+                  pauseThresholdMs === 1400
+                    ? 'bg-white text-amber-950 shadow-xs'
+                    : 'text-amber-800 hover:text-amber-950'
+                }`}
+              >
+                🐢 Relaxed (1.4s)
+              </button>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-amber-800/80 hidden sm:block">
+            Tip: Say <em>&quot;next&quot;</em>, <em>&quot;and&quot;</em>, or pause to add each product
           </div>
         </div>
 
@@ -384,20 +468,45 @@ export default function BatchProductEntryPage() {
           </div>
         )}
 
-        {/* Live Speaking Indicator */}
+        {/* Live Speaking Indicator & Pause Countdown Meter */}
         {isListening && (
-          <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1 animate-in fade-in">
+          <div className="p-3 bg-white border border-rose-200 rounded-xl text-xs space-y-2 shadow-xs animate-in fade-in">
             <div className="flex items-center justify-between font-bold">
               <span className="flex items-center gap-1.5 text-rose-700">
                 <Sparkles className="w-3.5 h-3.5 animate-spin text-rose-600" />
-                <span>Microphone active — speaking items will populate the table below:</span>
+                <span>
+                  {isPausing && interimTranscript
+                    ? 'Silence detected — auto-adding to table...'
+                    : interimTranscript
+                    ? 'Hearing speech...'
+                    : 'Listening... speak product name (e.g., "Silver Ganesha Idol 850 rupees")'}
+                </span>
               </span>
-              <span className="text-[10px] font-mono text-rose-500 uppercase">{selectedLang}</span>
+              <span className="text-[10px] font-mono text-slate-500 uppercase">{selectedLang}</span>
             </div>
+
             {interimTranscript && (
-              <p className="text-slate-700 font-mono text-[11px] bg-white p-1.5 rounded border border-rose-200">
-                Hearing: &quot;{interimTranscript}&quot;
-              </p>
+              <div className="space-y-1.5">
+                <div className="text-slate-800 font-mono text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-semibold text-slate-900">&quot;{interimTranscript}&quot;</span>
+                </div>
+
+                {/* Animated Pause Countdown Bar */}
+                {isPausing && (
+                  <div className="space-y-1 animate-in fade-in">
+                    <div className="flex justify-between text-[10px] text-amber-900 font-medium">
+                      <span>Adding item in {Math.max(0.1, ((pauseThresholdMs * (100 - pauseProgress)) / 100000)).toFixed(1)}s (or keep speaking)</span>
+                      <span className="font-mono font-bold text-amber-700">{pauseProgress}%</span>
+                    </div>
+                    <div className="w-full bg-amber-100 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-amber-600 h-1.5 rounded-full transition-all duration-75 ease-out"
+                        style={{ width: `${pauseProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -535,9 +644,10 @@ export default function BatchProductEntryPage() {
 
         <div className="divide-y divide-slate-100">
           {rows.map((row, index) => (
-            <div key={row.id} className="p-3.5 flex flex-col md:flex-row md:items-center gap-2 hover:bg-slate-50/50">
+            <div key={row.id} className="p-3 md:p-3.5 flex flex-col md:flex-row md:items-center gap-2 hover:bg-slate-50/50">
+              {/* Product Name & Index */}
               <div className="flex items-center gap-2 flex-1">
-                <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-bold flex items-center justify-center shrink-0">
+                <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0">
                   {index + 1}
                 </span>
                 <input
@@ -545,24 +655,38 @@ export default function BatchProductEntryPage() {
                   value={row.name}
                   onChange={(e) => updateRow(row.id, 'name', e.target.value)}
                   placeholder="e.g. Brass Ganesh Idol 6 inch"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm font-semibold focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
+                {/* Mobile-only trash icon on top row */}
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="md:hidden p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
+                  title="Remove row"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="flex items-center gap-2 pl-8 md:pl-0">
-                <select
-                  value={row.category}
-                  onChange={(e) => updateRow(row.id, 'category', e.target.value)}
-                  className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:bg-white"
-                >
-                  {PRODUCT_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+              {/* Category, Price, Qty controls - Full width utilization on mobile */}
+              <div className="grid grid-cols-12 gap-2 pl-0 md:pl-0 items-center">
+                {/* Category select: 5 cols on mobile, auto on desktop */}
+                <div className="col-span-5 md:col-auto">
+                  <select
+                    value={row.category}
+                    onChange={(e) => updateRow(row.id, 'category', e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:bg-white truncate"
+                  >
+                    {PRODUCT_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                <div className="relative w-28">
+                {/* Price: 4 cols on mobile, w-28 on desktop */}
+                <div className="col-span-4 md:col-auto relative md:w-28">
                   <span className="absolute left-2.5 top-2 text-xs font-bold text-slate-400">₹</span>
                   <input
                     type="number"
@@ -570,42 +694,46 @@ export default function BatchProductEntryPage() {
                     value={row.priceRupees}
                     onChange={(e) => updateRow(row.id, 'priceRupees', e.target.value)}
                     placeholder="Price"
-                    className="w-full pl-6 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:bg-white"
+                    className="w-full pl-6 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm font-bold text-slate-900 focus:bg-white"
                   />
                 </div>
 
-                <div className="w-20">
+                {/* Stock Qty: 3 cols on mobile, w-20 on desktop */}
+                <div className="col-span-3 md:col-auto md:w-20">
                   <input
                     type="number"
                     min="0"
                     value={row.stock}
                     onChange={(e) => updateRow(row.id, 'stock', e.target.value)}
                     placeholder="Qty"
-                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 text-center focus:bg-white"
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm font-bold text-slate-900 text-center focus:bg-white"
                     title="Stock Quantity"
                   />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => removeRow(row.id)}
-                  className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 ml-auto"
-                  title="Remove row"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {/* Desktop-only delete button */}
+                <div className="hidden md:block">
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 ml-auto"
+                    title="Remove row"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-3 pb-12">
+      {/* Action Buttons - Stacked on mobile for comfort, inline on desktop */}
+      <div className="flex flex-col sm:flex-row gap-2.5 pb-24 sm:pb-12">
         <button
           type="button"
           onClick={addManualRow}
-          className="flex-1 py-3 px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-bold rounded-xl"
+          className="w-full sm:flex-1 py-3 px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-bold rounded-xl active:scale-98 transition-all"
         >
           + Add Empty Row
         </button>
@@ -614,7 +742,7 @@ export default function BatchProductEntryPage() {
           type="button"
           disabled={isSubmitting || filledRows.length === 0}
           onClick={handleSaveBatch}
-          className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-extrabold rounded-xl shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full sm:flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-extrabold rounded-xl shadow-sm disabled:opacity-50 flex items-center justify-center gap-2 active:scale-98 transition-all"
         >
           {isSubmitting ? (
             'Saving All...'
@@ -627,11 +755,11 @@ export default function BatchProductEntryPage() {
         </button>
       </div>
 
-      {/* Sticky Bottom Bar on mobile/desktop when items are ready */}
+      {/* Sticky Bottom Bar on mobile/desktop when items are ready - lifted safely above mobile bottom nav */}
       {filledRows.length > 0 && !showSuccessModal && (
-        <div className="fixed bottom-4 left-0 right-0 max-w-3xl mx-auto px-4 z-40 animate-in slide-in-from-bottom-2">
-          <div className="bg-slate-900 text-white rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3 border border-slate-700">
-            <div className="flex items-center gap-2.5 pl-1">
+        <div className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 right-3 max-w-xl mx-auto z-40 animate-in slide-in-from-bottom-2">
+          <div className="bg-slate-900/95 backdrop-blur-md text-white rounded-2xl p-2.5 sm:p-3 shadow-2xl flex items-center justify-between gap-2.5 border border-slate-700">
+            <div className="flex items-center gap-2 pl-1.5">
               <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center">
                 {filledRows.length}
               </span>
@@ -639,15 +767,24 @@ export default function BatchProductEntryPage() {
                 {filledRows.length === 1 ? '1 item ready' : `${filledRows.length} items ready`}
               </span>
             </div>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleSaveBatch}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{isSubmitting ? 'Saving...' : 'Save to Catalogue'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={addManualRow}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold active:scale-95 transition-all"
+              >
+                + Row
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleSaveBatch}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{isSubmitting ? 'Saving...' : 'Save to Catalogue'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -655,7 +792,7 @@ export default function BatchProductEntryPage() {
       {/* MODAL: SUCCESS CONFIRMATION */}
       {showSuccessModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="w-10 h-10" />
             </div>
@@ -671,7 +808,7 @@ export default function BatchProductEntryPage() {
               <button
                 type="button"
                 onClick={() => router.push('/products?saved=batch')}
-                className="w-full py-3.5 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-black text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-transform"
+                className="w-full py-3.5 bg-amber-600 hover:bg-amber-700 text-white font-black text-sm rounded-xl shadow-md flex items-center justify-center gap-2"
               >
                 <span>View Products Catalogue</span>
                 <ArrowRight className="w-4 h-4" />
@@ -694,7 +831,7 @@ export default function BatchProductEntryPage() {
       {/* MODAL: PASTE MULTIPLE ITEMS */}
       {showPasteModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-slate-900">Paste List of Products</h3>
               <button onClick={() => setShowPasteModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -710,7 +847,7 @@ export default function BatchProductEntryPage() {
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
               placeholder="Brass Ganesh Idol 6 inch&#10;Wooden Wall Clock 12 inch&#10;Personalized Magic Mug&#10;Glass Lotus Diya"
-              className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-base sm:text-sm font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
 
             <div className="flex gap-2 pt-2">
@@ -735,8 +872,8 @@ export default function BatchProductEntryPage() {
 
       {/* MODAL: MOBILE MIC PERMISSION GUIDE */}
       {showMobileMicHelp && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <span>📱</span>

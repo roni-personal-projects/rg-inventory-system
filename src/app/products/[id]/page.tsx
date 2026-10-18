@@ -9,6 +9,7 @@ import {
   PackagePlus,
   SlidersHorizontal,
   Archive,
+  Trash2,
   History,
   CheckCircle,
   AlertCircle,
@@ -36,6 +37,8 @@ export default function ProductDetailPage({
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [showAdjustStockModal, setShowAdjustStockModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Add stock form state
   const [addQty, setAddQty] = useState('5');
@@ -185,6 +188,25 @@ export default function ProductDetailPage({
     }
   };
 
+  // Handle Delete
+  const handleDelete = async () => {
+    try {
+      setIsDeleting(true);
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete product');
+      }
+      try {
+        sessionStorage.removeItem('ruchi_products_cache');
+      } catch (_) {}
+      router.push('/products');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error deleting product');
+      setIsDeleting(false);
+    }
+  };
+
   // Handle Archive
   const handleArchive = async () => {
     if (!confirm(`Are you sure you want to archive "${product?.name}"? Historical sales will remain intact.`)) {
@@ -192,7 +214,7 @@ export default function ProductDetailPage({
     }
 
     try {
-      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/products/${id}?archive=true`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to archive product');
 
       alert('Product archived successfully.');
@@ -229,25 +251,26 @@ export default function ProductDetailPage({
           className="flex items-center gap-1.5 text-sm font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-200/60"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Products</span>
+          <span className="hidden sm:inline">Back to Products</span>
+          <span className="sm:hidden">Back</span>
         </Link>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowEditModal(true)}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
           >
             <Edit2 className="w-3.5 h-3.5" />
             <span>Edit</span>
           </button>
 
           <button
-            onClick={handleArchive}
-            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1"
-            title="Archive Product"
+            onClick={() => setShowDeleteModal(true)}
+            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
+            title="Delete Product"
           >
-            <Archive className="w-3.5 h-3.5" />
-            <span>Archive</span>
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete</span>
           </button>
         </div>
       </div>
@@ -383,7 +406,7 @@ export default function ProductDetailPage({
                       >
                         {mov.movement_type.replace('_', ' ')}
                       </span>
-                      <span className="text-slate-400 font-medium">
+                      <span className="text-slate-400 font-medium" suppressHydrationWarning>
                         {new Date(mov.created_at).toLocaleString([], {
                           dateStyle: 'short',
                           timeStyle: 'short',
@@ -415,7 +438,7 @@ export default function ProductDetailPage({
       {/* MODAL: ADD / RECEIVE STOCK */}
       {showAddStockModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-slate-900">Receive More Stock</h3>
               <button onClick={() => setShowAddStockModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -448,7 +471,7 @@ export default function ProductDetailPage({
                 value={addNotes}
                 onChange={(e) => setAddNotes(e.target.value)}
                 placeholder="e.g. Received new shipment box"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-base sm:text-xs text-slate-900"
               />
             </div>
 
@@ -475,7 +498,7 @@ export default function ProductDetailPage({
       {/* MODAL: ADJUST STOCK */}
       {showAdjustStockModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl animate-in zoom-in-95 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-slate-900">Adjust Stock Count</h3>
               <button onClick={() => setShowAdjustStockModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -627,6 +650,45 @@ export default function ProductDetailPage({
                 className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-sm"
               >
                 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE CONFIRMATION */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-black text-slate-900">
+                Delete &ldquo;{product.name}&rdquo;?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                This will permanently remove this item from your active product catalogue and stock counts.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDelete}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Product'}
               </button>
             </div>
           </div>
